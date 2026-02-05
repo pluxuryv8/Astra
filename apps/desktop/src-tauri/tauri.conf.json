@@ -27,7 +27,7 @@
         "height": 520,
         "resizable": true,
         "transparent": true,
-        "decorations": false,
+        "decorations": true,
         "alwaysOnTop": false,
         "minWidth": 640,
         "minHeight": 360,
