@@ -532,10 +532,8 @@ function AstraHud() {
   return (
     <div className={`app hud-app mode-${uiMode} mode-${windowMode} ${settingsOpen ? "settings-open" : ""}`}>
       <div className="hud-shell">
+        <div className="hud-top-zone" />
         <header className="hud-header">
-          <div className="hud-brand">
-            <div className="hud-title">Astra</div>
-          </div>
           <div className="hud-actions">
             <button className="icon-button" title="Настройки" onClick={() => setSettingsOpen((prev) => !prev)}>
               ⚙︎
@@ -551,31 +549,41 @@ function AstraHud() {
           </div>
         </header>
 
-        {uiMode === "idle" && (
-          <section className="hud-idle">
-            <div className="hud-greeting">{t.hud.greeting}</div>
-            <input
-              className="hud-input"
-              type="text"
-              placeholder={t.hud.placeholder}
-              value={queryText}
-              onChange={(e) => setQueryText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  handleRunCommand();
-                }
-              }}
-            />
-            <button className="primary" onClick={handleRunCommand} disabled={!selectedProject || !queryText.trim()}>
-              {t.hud.start}
-            </button>
-          </section>
-        )}
+        <div className="hud-content">
+          {uiMode === "idle" && (
+            <section className="hud-idle">
+              <div className="hud-brand">ASTRA</div>
+              <div className="hud-greeting">{t.hud.greeting}</div>
+              <div className="hud-input-row">
+                <input
+                  className="hud-input"
+                  type="text"
+                  placeholder={t.hud.placeholder}
+                  value={queryText}
+                  onChange={(e) => setQueryText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      handleRunCommand();
+                    }
+                  }}
+                />
+                <button
+                  className="send-button"
+                  title="Запустить"
+                  onClick={handleRunCommand}
+                  disabled={!selectedProject || !queryText.trim() || isActive}
+                >
+                  ➤
+                </button>
+              </div>
+            </section>
+          )}
 
-        {uiMode !== "idle" && (
-          <section className="hud-exec">
-            <div className="hud-section">
+          {uiMode !== "idle" && (
+            <section className="hud-exec">
+              <div className="hud-brand">ASTRA</div>
+              <div className="hud-section">
               <div className="hud-section-title">Сейчас</div>
               <div className="hud-value">{autopilotState?.step_summary || activeStep?.title || "—"}</div>
               <div className="hud-meta">Статус: {phaseLabel}</div>
@@ -647,27 +655,28 @@ function AstraHud() {
               </div>
             )}
 
-            {isDone && (
-              <div className="hud-section">
-                <div className="hud-section-title">Итог</div>
-                <div className="hud-value">{overlayStatusLabel}</div>
-              </div>
-            )}
-          </section>
-        )}
+              {isDone && (
+                <div className="hud-section">
+                  <div className="hud-section-title">Итог</div>
+                  <div className="hud-value">{overlayStatusLabel}</div>
+                </div>
+              )}
+            </section>
+          )}
 
-        {uiMode !== "idle" && !isOverlay && (
-          <footer className="hud-footer">
-            <span className="hud-pill">{t.labels.coverage} {formatCoverage(metrics)}</span>
-            <span className="hud-pill">{t.labels.conflicts} {metrics?.conflicts ?? 0}</span>
-            <span className="hud-pill">{t.labels.freshness} {formatFreshness(metrics)}</span>
-            <span className="hud-pill">{t.labels.approvals} {pendingApprovals.length}</span>
-            <button className="ghost" onClick={handleExportSnapshot} disabled={!run}>{t.workspace.exportJson}</button>
-            <button className="ghost" onClick={handleExportReport} disabled={!reportArtifact}>{t.workspace.exportMd}</button>
-          </footer>
-        )}
+          {uiMode !== "idle" && !isOverlay && (
+            <footer className="hud-footer">
+              <span className="hud-pill">{t.labels.coverage} {formatCoverage(metrics)}</span>
+              <span className="hud-pill">{t.labels.conflicts} {metrics?.conflicts ?? 0}</span>
+              <span className="hud-pill">{t.labels.freshness} {formatFreshness(metrics)}</span>
+              <span className="hud-pill">{t.labels.approvals} {pendingApprovals.length}</span>
+              <button className="ghost" onClick={handleExportSnapshot} disabled={!run}>{t.workspace.exportJson}</button>
+              <button className="ghost" onClick={handleExportReport} disabled={!reportArtifact}>{t.workspace.exportMd}</button>
+            </footer>
+          )}
 
-        {status && <div className="hud-toast">{status}</div>}
+          {status && <div className="hud-toast">{status}</div>}
+        </div>
       </div>
 
       <aside className={`hud-settings ${settingsOpen ? "open" : ""}`}>
