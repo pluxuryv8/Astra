@@ -675,7 +675,7 @@ function AstraHud() {
             </footer>
           )}
 
-          {status && <div className="hud-toast">{status}</div>}
+          {status && uiMode !== "idle" && <div className="hud-toast">{status}</div>}
         </div>
       </div>
 
