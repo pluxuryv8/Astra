@@ -130,6 +130,7 @@ impl BashExecutor {
         })
     }
 
+    #[allow(dead_code)]
     pub fn restart(&mut self) {
         self.working_dir = None;
         println!("[оболочка] Сеанс перезапущен");

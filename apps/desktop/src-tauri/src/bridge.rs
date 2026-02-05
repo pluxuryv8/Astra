@@ -1,5 +1,4 @@
 use std::env;
-use std::io::Read;
 use std::thread;
 
 use serde::{Deserialize, Serialize};
@@ -174,33 +173,35 @@ fn handle_shell_execute(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     }
 }
 
+#[cfg(feature = "desktop-skills")]
 fn handle_autopilot_capture(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let parsed: Result<AutopilotCaptureRequest, _> = serde_json::from_str(body);
     match parsed {
         Ok(req) => {
-            #[cfg(feature = "desktop-skills")]
-            {
-                let max_width = req.max_width.unwrap_or(1280);
-                let quality = req.quality.unwrap_or(60);
-                match screen::capture_screen(max_width, quality) {
-                    Ok(capture) => {
-                        let resp = AutopilotCaptureResponse {
-                            image_base64: capture.image_base64,
-                            width: capture.width,
-                            height: capture.height,
-                            screen_width: capture.screen_width,
-                            screen_height: capture.screen_height,
-                            format: "jpeg".to_string(),
-                        };
-                        return Response::from_string(serde_json::to_string(&resp).unwrap()).with_status_code(200);
-                    }
-                    Err(err) => return Response::from_string(err).with_status_code(500),
+            let max_width = req.max_width.unwrap_or(1280);
+            let quality = req.quality.unwrap_or(60);
+            match screen::capture_screen(max_width, quality) {
+                Ok(capture) => {
+                    let resp = AutopilotCaptureResponse {
+                        image_base64: capture.image_base64,
+                        width: capture.width,
+                        height: capture.height,
+                        screen_width: capture.screen_width,
+                        screen_height: capture.screen_height,
+                        format: "jpeg".to_string(),
+                    };
+                    Response::from_string(serde_json::to_string(&resp).unwrap()).with_status_code(200)
                 }
+                Err(err) => Response::from_string(err).with_status_code(500),
             }
-            Response::from_string("НЕДОСТУПНО").with_status_code(503)
         }
         Err(_) => Response::from_string("некорректный запрос").with_status_code(400),
     }
+}
+
+#[cfg(not(feature = "desktop-skills"))]
+fn handle_autopilot_capture(_body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    Response::from_string("НЕДОСТУПНО").with_status_code(503)
 }
 
 fn handle_autopilot_act(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
@@ -224,11 +225,13 @@ fn handle_autopilot_act(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     }
 }
 
+#[cfg(feature = "desktop-skills")]
 fn handle_autopilot_permissions() -> Response<std::io::Cursor<Vec<u8>>> {
-    #[cfg(feature = "desktop-skills")]
-    {
-        let status = permissions::check_permissions();
-        return Response::from_string(serde_json::to_string(&status).unwrap()).with_status_code(200);
-    }
+    let status = permissions::check_permissions();
+    Response::from_string(serde_json::to_string(&status).unwrap()).with_status_code(200)
+}
+
+#[cfg(not(feature = "desktop-skills"))]
+fn handle_autopilot_permissions() -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string("НЕДОСТУПНО").with_status_code(503)
 }

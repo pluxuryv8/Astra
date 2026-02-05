@@ -77,6 +77,7 @@ impl ComputerControl {
         })
     }
 
+    #[allow(dead_code)]
     pub fn with_dimensions(screen_width: u32, screen_height: u32) -> Self {
         Self { screen_width, screen_height }
     }
@@ -108,6 +109,7 @@ impl ComputerControl {
 
     /// Скриншот без окон приложения — захватывает всё НИЖЕ указанного окна
     #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
     pub fn take_screenshot_excluding(&self, window_id: u32) -> Result<String, ComputerError> {
         use core_graphics::window::{
             kCGWindowListOptionOnScreenBelowWindow, kCGWindowListExcludeDesktopElements,
@@ -494,6 +496,7 @@ impl ComputerControl {
     /// Скриншот конкретной области в полном разрешении (для действия zoom)
     /// Использует ту же логику исключения, что и take_screenshot_excluding
     #[cfg(target_os = "macos")]
+    #[allow(dead_code)]
     pub fn take_screenshot_region_excluding(&self, region: [i32; 4], window_id: u32) -> Result<String, ComputerError> {
         use core_graphics::window::{
             kCGWindowListOptionOnScreenBelowWindow, kCGWindowListExcludeDesktopElements,
