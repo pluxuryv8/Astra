@@ -48,7 +48,7 @@ body {
   max-width: 860px;
   max-height: calc(100vh - 20px);
   height: auto;
-  padding: 20px 22px 18px;
+  padding: 52px 22px 18px;
   border-radius: 20px;
   background: var(--hud-bg);
   border: 1px solid var(--hud-border);
@@ -63,7 +63,7 @@ body {
 .mode-overlay .hud-shell {
   width: min(76vw, 640px);
   max-width: 640px;
-  padding: 16px 18px 14px;
+  padding: 48px 18px 14px;
   border-radius: 16px;
 }
 
@@ -109,10 +109,11 @@ body {
 .hud-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: 12px;
   position: absolute;
-  top: 12px;
+  top: 10px;
+  left: 16px;
   right: 16px;
   opacity: 0;
   pointer-events: none;
@@ -137,7 +138,7 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: 36px;
+  height: 40px;
   -webkit-app-region: drag;
   z-index: 3;
 }
@@ -149,12 +150,14 @@ body {
 }
 
 .hud-brand {
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--hud-text);
   margin-bottom: 8px;
+  text-align: center;
+  align-self: center;
 }
 
 .hud-title {
