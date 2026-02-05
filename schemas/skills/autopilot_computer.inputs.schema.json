@@ -9,7 +9,8 @@
     "max_cycles": {"type": "integer", "minimum": 1},
     "max_actions": {"type": "integer", "minimum": 1},
     "screenshot_width": {"type": "integer", "minimum": 320},
-    "quality": {"type": "integer", "minimum": 30, "maximum": 90}
+    "quality": {"type": "integer", "minimum": 30, "maximum": 90},
+    "loop_delay_ms": {"type": "integer", "minimum": 200, "maximum": 5000}
   },
   "required": ["goal"],
   "additionalProperties": false

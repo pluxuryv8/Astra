@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/autopilot_action.schema.json",
+  "title": "autopilot_action",
+  "type": "object",
+  "properties": {
+    "action": {"type": "object"},
+    "index": {"type": "integer"},
+    "total": {"type": "integer"},
+    "step_summary": {"type": "string"}
+  },
+  "required": ["action", "index", "total"],
+  "additionalProperties": false
+}

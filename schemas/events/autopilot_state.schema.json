@@ -10,6 +10,7 @@
     "reason": {"type": "string"},
     "actions": {"type": "array", "items": {"type": "object"}},
     "status": {"type": "string"},
+    "phase": {"type": "string"},
     "cycle": {"type": "integer"},
     "max_cycles": {"type": "integer"},
     "screen_hash": {"type": "string"},

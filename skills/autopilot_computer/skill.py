@@ -35,6 +35,14 @@ DANGEROUS_KEYWORDS = [
     "отправ",
     "публикац",
     "создать плейлист",
+    "банк",
+    "карта",
+    "кошел",
+    "платеж",
+    "удалить",
+    "оформить заказ",
+    "заказ",
+    "подтвердить",
 ]
 
 
@@ -77,10 +85,13 @@ class AutopilotComputerSkill:
 
     def run(self, inputs: dict, ctx) -> SkillResult:
         goal = inputs.get("goal") or ctx.run.get("query_text") or "Задача"
-        max_cycles = int(inputs.get("max_cycles") or 30)
-        max_actions = int(inputs.get("max_actions") or 6)
-        screenshot_width = int(inputs.get("screenshot_width") or 1280)
-        quality = int(inputs.get("quality") or 60)
+        settings = ctx.settings or {}
+        autopilot_cfg = settings.get("autopilot") or {}
+        max_cycles = int(inputs.get("max_cycles") or autopilot_cfg.get("max_cycles") or 30)
+        max_actions = int(inputs.get("max_actions") or autopilot_cfg.get("max_actions") or 6)
+        screenshot_width = int(inputs.get("screenshot_width") or autopilot_cfg.get("screenshot_width") or 1280)
+        quality = int(inputs.get("quality") or autopilot_cfg.get("quality") or 60)
+        loop_delay_ms = int(inputs.get("loop_delay_ms") or autopilot_cfg.get("loop_delay_ms") or 650)
         hints = inputs.get("hints") or []
 
         if ctx.run.get("mode") not in ("execute_confirm", "autopilot_safe"):
@@ -192,6 +203,8 @@ class AutopilotComputerSkill:
             if needs_user:
                 status = "needs_user"
                 interventions.append(parsed.get("reason") or "Требуется ручное действие")
+            elif ask_confirm_required:
+                status = "waiting_confirm"
 
             emit(ctx.run["id"], "autopilot_state", "Состояние автопилота", {
                 "goal": parsed.get("goal", goal),
@@ -200,6 +213,7 @@ class AutopilotComputerSkill:
                 "reason": parsed.get("reason", ""),
                 "actions": actions,
                 "status": status,
+                "phase": "acting" if actions else "thinking",
                 "cycle": cycle,
                 "max_cycles": max_cycles,
                 "screen_hash": screen_hash,
@@ -241,7 +255,7 @@ class AutopilotComputerSkill:
                     break
 
             self._execute_actions(actions, ctx, image_width, image_height)
-            time.sleep(0.2)
+            time.sleep(max(loop_delay_ms, 200) / 1000)
 
         out_dir = _artifact_dir(ctx.base_dir, ctx.run["id"])
         log_path = out_dir / "autopilot_log.json"
@@ -282,8 +296,14 @@ class AutopilotComputerSkill:
         )
 
     def _execute_actions(self, actions: list[dict], ctx, image_width: int, image_height: int) -> None:
-        for action in actions:
+        for idx, action in enumerate(actions, start=1):
             action_type = action.get("type")
+            emit(ctx.run["id"], "autopilot_action", "Действие автопилота", {
+                "action": action,
+                "index": idx,
+                "total": len(actions),
+                "step_summary": ctx.plan_step.get("title"),
+            }, task_id=ctx.task["id"], step_id=ctx.plan_step["id"])
             if action_type == "wait":
                 time.sleep(float(action.get("ms") or 500) / 1000)
                 continue

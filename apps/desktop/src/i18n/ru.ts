@@ -37,7 +37,13 @@ export const ru = {
     namePlaceholder: "Название проекта",
     tagsPlaceholder: "Теги (через запятую)",
     createButton: "Создать",
-    noTags: "Без тегов"
+    noTags: "Без тегов",
+    empty: "Проекты не найдены. Создайте проект через API."
+  },
+  hud: {
+    greeting: "Чем займёмся?",
+    placeholder: "Например: Астра, собери факты и подготовь краткий отчёт",
+    start: "Запустить"
   },
   workspace: {
     queryTitle: "Команда",
@@ -209,6 +215,7 @@ export const ru = {
     approval_approved: "Подтверждение принято",
     approval_rejected: "Подтверждение отклонено",
     autopilot_state: "Состояние автопилота",
+    autopilot_action: "Действие автопилота",
     run_paused: "Запуск на паузе",
     run_resumed: "Запуск возобновлён"
   }
