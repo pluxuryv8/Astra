@@ -4,6 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+MODE="foreground"
+if [ "${1:-}" = "--background" ]; then
+  MODE="background"
+fi
+
 if ! command -v node >/dev/null 2>&1; then
   echo "Нужен Node.js (node). Установи Node и повтори запуск." >&2
   exit 1
@@ -39,6 +44,21 @@ npm --prefix apps/desktop install >/dev/null
 
 API_PORT="${ASTRA_API_PORT:-8055}"
 export ASTRA_API_PORT="$API_PORT"
+
+LOG_DIR=".astra/logs"
+mkdir -p "$LOG_DIR"
+
+if [ "$MODE" = "background" ]; then
+  python -m uvicorn apps.api.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG_DIR/api.log" 2>&1 &
+  echo $! > .astra/api.pid
+
+  source "$HOME/.cargo/env" >/dev/null 2>&1 || true
+  nohup npm --prefix apps/desktop run tauri dev >"$LOG_DIR/tauri.log" 2>&1 &
+  echo $! > .astra/tauri.pid
+
+  echo "Randarc-Astra запущена в фоне. Логи: $LOG_DIR"
+  exit 0
+fi
 
 cleanup() {
   if [ -n "${API_PID:-}" ] && kill -0 "$API_PID" >/dev/null 2>&1; then
