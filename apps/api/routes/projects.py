@@ -12,7 +12,16 @@ router = APIRouter(prefix="/api/v1/projects", tags=["projects"], dependencies=[D
 
 @router.post("")
 def create_project(payload: ProjectCreate):
-    project = store.create_project(payload.name, payload.tags, payload.settings)
+    settings = payload.settings
+    if not settings:
+        settings = {
+            "llm": {
+                "provider": "openai",
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4.1-mini",
+            }
+        }
+    project = store.create_project(payload.name, payload.tags, settings)
     return project
 
 
