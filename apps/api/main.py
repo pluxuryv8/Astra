@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 from apps.api.config import load_settings
-from apps.api.routes import projects, runs, run_events, skills, artifacts, auth
+from apps.api.routes import projects, runs, run_events, skills, artifacts, auth, secrets
 from core.run_engine import RunEngine
 from memory import store
 
@@ -23,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(run_events.router)
     app.include_router(skills.router)
     app.include_router(artifacts.router)
+    app.include_router(secrets.router)
     app.include_router(auth.router)
 
     return app

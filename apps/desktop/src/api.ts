@@ -8,6 +8,14 @@ export async function checkPermissions(): Promise<{ screen_recording: boolean; a
   return (await invoke("check_permissions")) as { screen_recording: boolean; accessibility: boolean; message: string };
 }
 
+export async function setVaultPassphrase(passphrase: string): Promise<void> {
+  await invoke("set_vault_passphrase", { passphrase });
+}
+
+export async function getVaultPassphrase(): Promise<string | null> {
+  return (await invoke("get_vault_passphrase")) as string | null;
+}
+
 export async function initAuth(): Promise<string> {
   if (sessionToken) return sessionToken;
   const token = (await invoke("get_or_create_session_token")) as string;
@@ -56,6 +64,10 @@ async function apiBlob(path: string): Promise<Blob> {
 
 export function listProjects() {
   return api<any[]>("/projects");
+}
+
+export function updateProject(projectId: string, payload: { name?: string | null; tags?: string[] | null; settings?: Record<string, any> | null }) {
+  return api<any>(`/projects/${projectId}`, { method: "PUT", body: JSON.stringify(payload) });
 }
 
 export function createProject(payload: { name: string; tags: string[]; settings: Record<string, any> }) {
@@ -127,6 +139,14 @@ export async function downloadArtifact(artifactId: string): Promise<Blob> {
 
 export async function downloadSnapshot(runId: string): Promise<Blob> {
   return apiBlob(`/runs/${runId}/snapshot/download`);
+}
+
+export function unlockVault(passphrase: string) {
+  return api<any>("/secrets/unlock", { method: "POST", body: JSON.stringify({ passphrase }) });
+}
+
+export function storeOpenAIKey(apiKey: string) {
+  return api<any>("/secrets/openai", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
 }
 
 export function apiBase() {

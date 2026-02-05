@@ -3,6 +3,7 @@ import {
   apiBase,
   listProjects,
   createProject,
+  updateProject,
   createRun,
   createPlan,
   startRun,
@@ -13,6 +14,10 @@ import {
   initAuth,
   getSessionToken,
   checkPermissions,
+  setVaultPassphrase,
+  getVaultPassphrase,
+  unlockVault,
+  storeOpenAIKey,
   approve,
   reject,
   resolveConflict,
@@ -118,6 +123,10 @@ function MainView() {
   const [projectTags, setProjectTags] = useState("");
   const [status, setStatus] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<any | null>(null);
+  const [vaultPassphrase, setVaultPassphraseValue] = useState("");
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [vaultStatus, setVaultStatus] = useState<string | null>(null);
+  const [savingVault, setSavingVault] = useState(false);
   const eventSourceRef = useRef<EventSource | null>(null);
   const refreshLock = useRef(false);
 
@@ -132,6 +141,17 @@ function MainView() {
     checkPermissions()
       .then(setPermissions)
       .catch(() => setPermissions(null));
+  }, [view]);
+
+  useEffect(() => {
+    if (view !== "onboarding") return;
+    getVaultPassphrase()
+      .then(async (passphrase) => {
+        if (!passphrase) return;
+        await unlockVault(passphrase);
+        setVaultStatus(t.onboarding.vaultUnlocked);
+      })
+      .catch(() => null);
   }, [view]);
 
   useEffect(() => {
@@ -161,6 +181,62 @@ function MainView() {
     setProjects((prev) => [project, ...prev]);
     setProjectName("");
     setProjectTags("");
+  }
+
+  async function applyOpenAISettings(projectsList: any[]) {
+    const settings = {
+      llm: {
+        provider: "openai",
+        base_url: "https://api.openai.com/v1",
+        model: "gpt-4.1-mini"
+      }
+    };
+    await Promise.all(projectsList.map((p) => updateProject(p.id, { settings })));
+  }
+
+  async function handleSaveProvider() {
+    if (!vaultPassphrase) {
+      setStatus(t.onboarding.passphraseRequired);
+      return;
+    }
+    if (!openaiKey) {
+      setStatus(t.onboarding.keyRequired);
+      return;
+    }
+    try {
+      setSavingVault(true);
+      await setVaultPassphrase(vaultPassphrase);
+      await unlockVault(vaultPassphrase);
+      await storeOpenAIKey(openaiKey);
+      const data = await listProjects();
+      if (data.length > 0) {
+        await applyOpenAISettings(data);
+        setProjects(data);
+      }
+      setVaultStatus(t.onboarding.vaultSaved);
+      setVaultPassphraseValue("");
+      setOpenaiKey("");
+      setStatus(null);
+    } catch (err: any) {
+      setStatus(err.message || t.onboarding.vaultError);
+    } finally {
+      setSavingVault(false);
+    }
+  }
+
+  async function handleUnlockFromKeychain() {
+    try {
+      const passphrase = await getVaultPassphrase();
+      if (!passphrase) {
+        setStatus(t.onboarding.vaultMissing);
+        return;
+      }
+      await unlockVault(passphrase);
+      setVaultStatus(t.onboarding.vaultUnlocked);
+      setStatus(null);
+    } catch (err: any) {
+      setStatus(err.message || t.onboarding.vaultError);
+    }
   }
 
   function openProject(project: any) {
@@ -343,7 +419,29 @@ function MainView() {
             <div>
               <h3>{t.onboarding.providerTitle}</h3>
               <p>{t.onboarding.providerText}</p>
-              <code>{t.onboarding.providerCommand}</code>
+              <div className="row">
+                <input
+                  type="password"
+                  placeholder={t.onboarding.passphrasePlaceholder}
+                  value={vaultPassphrase}
+                  onChange={(e) => setVaultPassphraseValue(e.target.value)}
+                />
+              </div>
+              <div className="row">
+                <input
+                  type="password"
+                  placeholder={t.onboarding.openaiKeyPlaceholder}
+                  value={openaiKey}
+                  onChange={(e) => setOpenaiKey(e.target.value)}
+                />
+              </div>
+              <div className="row">
+                <button className="primary" disabled={savingVault} onClick={handleSaveProvider}>
+                  {savingVault ? t.onboarding.saving : t.onboarding.saveProvider}
+                </button>
+                <button onClick={handleUnlockFromKeychain}>{t.onboarding.unlockVault}</button>
+              </div>
+              {vaultStatus && <div className="status">{vaultStatus}</div>}
             </div>
             <div>
               <h3>{t.onboarding.vaultTitle}</h3>

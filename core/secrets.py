@@ -4,12 +4,24 @@ import os
 from typing import Optional
 
 
+_runtime_passphrase: Optional[str] = None
+
+
 def _vault_path() -> Optional[str]:
     return os.getenv("ASTRA_VAULT_PATH", ".astra/vault.bin")
 
 
 def _vault_passphrase() -> Optional[str]:
-    return os.getenv("ASTRA_VAULT_PASSPHRASE")
+    return _runtime_passphrase or os.getenv("ASTRA_VAULT_PASSPHRASE")
+
+
+def set_runtime_passphrase(value: Optional[str]) -> None:
+    global _runtime_passphrase
+    _runtime_passphrase = value
+
+
+def get_runtime_passphrase() -> Optional[str]:
+    return _runtime_passphrase
 
 
 def get_secret(key: str) -> Optional[str]:

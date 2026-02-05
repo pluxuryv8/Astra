@@ -23,10 +23,28 @@ fn get_or_create_session_token() -> Result<String, String> {
     Ok(token)
 }
 
+#[tauri::command]
+fn set_vault_passphrase(passphrase: String) -> Result<(), String> {
+    // EN kept: идентификаторы keychain стабильны между версиями
+    let entry = keyring::Entry::new("randarc-astra", "vault_passphrase").map_err(|e| e.to_string())?;
+    entry.set_password(&passphrase).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn get_vault_passphrase() -> Result<Option<String>, String> {
+    // EN kept: идентификаторы keychain стабильны между версиями
+    let entry = keyring::Entry::new("randarc-astra", "vault_passphrase").map_err(|e| e.to_string())?;
+    match entry.get_password() {
+        Ok(passphrase) => Ok(Some(passphrase)),
+        Err(_) => Ok(None),
+    }
+}
+
 fn main() {
     bridge::start_bridge();
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_or_create_session_token, check_permissions])
+        .invoke_handler(tauri::generate_handler![get_or_create_session_token, set_vault_passphrase, get_vault_passphrase, check_permissions])
         .setup(|app| {
             let handle = app.handle();
             let mut shortcut_manager = handle.global_shortcut_manager();
