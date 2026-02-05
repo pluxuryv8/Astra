@@ -2,29 +2,47 @@
 import { invoke } from "@tauri-apps/api/tauri";
 
 const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8123/api/v1";
+const SESSION_KEY = "astra_session_token";
 let sessionToken: string | null = null;
 
 export async function checkPermissions(): Promise<{ screen_recording: boolean; accessibility: boolean; message: string }> {
   return (await invoke("check_permissions")) as { screen_recording: boolean; accessibility: boolean; message: string };
 }
 
-export async function setVaultPassphrase(passphrase: string): Promise<void> {
-  await invoke("set_vault_passphrase", { passphrase });
+export async function setApiKey(apiKey: string): Promise<void> {
+  await invoke("set_api_key", { apiKey });
 }
 
-export async function getVaultPassphrase(): Promise<string | null> {
-  return (await invoke("get_vault_passphrase")) as string | null;
+export async function getApiKey(): Promise<string | null> {
+  return (await invoke("get_api_key")) as string | null;
+}
+
+function getOrCreateSessionToken(): string {
+  if (sessionToken) return sessionToken;
+  const stored = localStorage.getItem(SESSION_KEY);
+  if (stored) {
+    sessionToken = stored;
+    return stored;
+  }
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  const token = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  localStorage.setItem(SESSION_KEY, token);
+  sessionToken = token;
+  return token;
 }
 
 export async function initAuth(): Promise<string> {
-  if (sessionToken) return sessionToken;
-  const token = (await invoke("get_or_create_session_token")) as string;
-  await fetch(`${API_BASE}/auth/bootstrap`, {
+  const token = getOrCreateSessionToken();
+  const res = await fetch(`${API_BASE}/auth/bootstrap`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token })
   });
-  sessionToken = token;
+  if (!res.ok && res.status !== 409) {
+    const text = await res.text();
+    throw new Error(text || res.statusText);
+  }
   return token;
 }
 
@@ -139,10 +157,6 @@ export async function downloadArtifact(artifactId: string): Promise<Blob> {
 
 export async function downloadSnapshot(runId: string): Promise<Blob> {
   return apiBlob(`/runs/${runId}/snapshot/download`);
-}
-
-export function unlockVault(passphrase: string) {
-  return api<any>("/secrets/unlock", { method: "POST", body: JSON.stringify({ passphrase }) });
 }
 
 export function storeOpenAIKey(apiKey: string) {

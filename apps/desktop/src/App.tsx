@@ -14,9 +14,8 @@ import {
   initAuth,
   getSessionToken,
   checkPermissions,
-  setVaultPassphrase,
-  getVaultPassphrase,
-  unlockVault,
+  setApiKey,
+  getApiKey,
   storeOpenAIKey,
   approve,
   reject,
@@ -119,9 +118,8 @@ function AstraHud() {
   const [status, setStatus] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [permissions, setPermissions] = useState<any | null>(null);
-  const [vaultPassphrase, setVaultPassphraseValue] = useState("");
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [vaultStatus, setVaultStatus] = useState<string | null>(null);
+  const [openaiKey, setOpenaiKeyValue] = useState("");
+  const [apiKeyReady, setApiKeyReady] = useState(false);
   const [savingVault, setSavingVault] = useState(false);
   const [modelName, setModelName] = useState("gpt-4.1-mini");
   const [loopDelayMs, setLoopDelayMs] = useState(650);
@@ -166,16 +164,6 @@ function AstraHud() {
     checkPermissions()
       .then(setPermissions)
       .catch(() => setPermissions(null));
-  }, []);
-
-  useEffect(() => {
-    getVaultPassphrase()
-      .then(async (passphrase) => {
-        if (!passphrase) return;
-        await unlockVault(passphrase);
-        setVaultStatus(t.onboarding.vaultUnlocked);
-      })
-      .catch(() => null);
   }, []);
 
   useEffect(() => {
@@ -287,11 +275,19 @@ function AstraHud() {
     await updateProject(projectId, { settings });
   }
 
-  async function handleSaveProvider() {
-    if (!vaultPassphrase) {
-      setStatus(t.onboarding.passphraseRequired);
-      return;
+  async function ensureApiKey(): Promise<boolean> {
+    if (apiKeyReady) return true;
+    const stored = await getApiKey();
+    if (!stored) {
+      setStatus("API-ключ не найден. Откройте настройки и сохраните ключ.");
+      return false;
     }
+    await storeOpenAIKey(stored);
+    setApiKeyReady(true);
+    return true;
+  }
+
+  async function handleSaveProvider() {
     if (!openaiKey) {
       setStatus(t.onboarding.keyRequired);
       return;
@@ -302,17 +298,12 @@ function AstraHud() {
     }
     try {
       setSavingVault(true);
-      await setVaultPassphrase(vaultPassphrase);
-      await unlockVault(vaultPassphrase);
+      await setApiKey(openaiKey);
       await storeOpenAIKey(openaiKey);
       await applySettingsToProject(selectedProject.id);
-      const data = await listProjects();
-      setProjects(data);
-      setSelectedProject(data.find((p) => p.id === selectedProject.id) || data[0]);
-      setVaultStatus(t.onboarding.vaultSaved);
-      setVaultPassphraseValue("");
-      setOpenaiKey("");
-      setStatus(null);
+      setApiKeyReady(true);
+      setOpenaiKeyValue("");
+      setStatus("Ключ сохранён в Keychain");
     } catch (err: any) {
       setStatus(err.message || t.onboarding.vaultError);
     } finally {
@@ -320,36 +311,21 @@ function AstraHud() {
     }
   }
 
-  async function handleUnlockFromKeychain() {
-    try {
-      const passphrase = await getVaultPassphrase();
-      if (!passphrase) {
-        setStatus(t.onboarding.vaultMissing);
-        return;
-      }
-      await unlockVault(passphrase);
-      setVaultStatus(t.onboarding.vaultUnlocked);
-      setStatus(null);
-    } catch (err: any) {
-      setStatus(err.message || t.onboarding.vaultError);
+  async function handleLoadFromKeychain() {
+    const stored = await getApiKey();
+    if (!stored) {
+      setStatus("В Keychain нет ключа. Сохраните ключ вручную.");
+      return;
     }
-  }
-
-  async function handleCreateRun() {
-    if (!selectedProject || !queryText.trim()) return;
-    const newRun = await createRun(selectedProject.id, { query_text: queryText, mode });
-    setRun(newRun);
-    localStorage.setItem("astra_last_run_id", newRun.id);
-    setEvents([]);
-    setPlan([]);
-    setTasks([]);
-    setApprovals([]);
-    setArtifacts([]);
-    setMetrics(null);
+    await storeOpenAIKey(stored);
+    setApiKeyReady(true);
+    setStatus("Ключ загружен из Keychain");
   }
 
   async function handleRunCommand() {
     if (!selectedProject || !queryText.trim()) return;
+    const ok = await ensureApiKey();
+    if (!ok) return;
     const newRun = await createRun(selectedProject.id, { query_text: queryText, mode });
     setRun(newRun);
     localStorage.setItem("astra_last_run_id", newRun.id);
@@ -584,76 +560,76 @@ function AstraHud() {
             <section className="hud-exec">
               <div className="hud-brand">ASTRA</div>
               <div className="hud-section">
-              <div className="hud-section-title">Сейчас</div>
-              <div className="hud-value">{autopilotState?.step_summary || activeStep?.title || "—"}</div>
-              <div className="hud-meta">Статус: {phaseLabel}</div>
-              <div className="hud-meta">Размышление: {autopilotState?.reason || "—"}</div>
-              <div className="hud-meta">Цель: {autopilotState?.goal || run?.query_text || "—"}</div>
-            </div>
-
-            <div className="hud-section">
-              <div className="hud-section-title">Задачи</div>
-              <ul className="hud-list scrollable">
-                {latestPlan.map((step) => (
-                  <li key={step.id}>
-                    <div className="hud-list-title">{step.step_index + 1}. {step.title}</div>
-                    <div className={`hud-list-sub status-${step.status}`}>{stepStatusLabel(step)}</div>
-                    {!isOverlay && tasksByStep.get(step.id)?.length ? (
-                      <ul className="hud-sublist">
-                        {tasksByStep.get(step.id)!.slice(0, 3).map((task) => (
-                          <li key={task.id}>
-                            <div className="hud-list-sub">{label(t.taskStatus, task.status, task.status)}</div>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : null}
-                    {step.status === "failed" && (
-                      <div className="hud-row">
-                        <button onClick={() => handleRetryStep(step.id)}>{t.workspace.retryStep}</button>
-                      </div>
-                    )}
-                  </li>
-                ))}
-                {!latestPlan.length && <li className="muted">{t.empty.plan}</li>}
-              </ul>
-            </div>
-
-            <div className="hud-section">
-              <div className="hud-section-title">Действия</div>
-              <div className="hud-actions-row">
-                {latestActions.map((action: any, idx: number) => (
-                  <span key={`action-${idx}`} className="hud-chip">{action.type}</span>
-                ))}
-                {!latestActions.length && <span className="hud-chip muted">—</span>}
+                <div className="hud-section-title">Сейчас</div>
+                <div className="hud-value">{autopilotState?.step_summary || activeStep?.title || "—"}</div>
+                <div className="hud-meta">Статус: {phaseLabel}</div>
+                <div className="hud-meta">Размышление: {autopilotState?.reason || "—"}</div>
+                <div className="hud-meta">Цель: {autopilotState?.goal || run?.query_text || "—"}</div>
               </div>
-            </div>
 
-            {!isOverlay && (
               <div className="hud-section">
-                <div className="hud-section-title">Журнал</div>
+                <div className="hud-section-title">Задачи</div>
                 <ul className="hud-list scrollable">
-                  {latestEvents.map((evt) => (
-                    <li key={`${evt.id}-${evt.seq}`}>
-                      <div className="hud-list-title">{label(t.events, evt.type, evt.type)}</div>
-                      <div className="hud-list-sub">{evt.message}</div>
+                  {latestPlan.map((step) => (
+                    <li key={step.id}>
+                      <div className="hud-list-title">{step.step_index + 1}. {step.title}</div>
+                      <div className={`hud-list-sub status-${step.status}`}>{stepStatusLabel(step)}</div>
+                      {!isOverlay && tasksByStep.get(step.id)?.length ? (
+                        <ul className="hud-sublist">
+                          {tasksByStep.get(step.id)!.slice(0, 3).map((task) => (
+                            <li key={task.id}>
+                              <div className="hud-list-sub">{label(t.taskStatus, task.status, task.status)}</div>
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                      {step.status === "failed" && (
+                        <div className="hud-row">
+                          <button onClick={() => handleRetryStep(step.id)}>{t.workspace.retryStep}</button>
+                        </div>
+                      )}
                     </li>
                   ))}
-                  {!latestEvents.length && <li className="muted">{t.empty.events}</li>}
+                  {!latestPlan.length && <li className="muted">{t.empty.plan}</li>}
                 </ul>
               </div>
-            )}
 
-            {pendingApprovals[0] && (
-              <div className="hud-section hud-approval">
-                <div className="hud-section-title">Подтверждение</div>
-                <div className="hud-value">{pendingApprovals[0].title}</div>
-                {pendingApprovals[0].description && <div className="hud-meta">{pendingApprovals[0].description}</div>}
-                <div className="hud-row">
-                  <button className="primary" onClick={() => handleApprove(pendingApprovals[0].id)}>{t.workspace.approve}</button>
-                  <button className="danger" onClick={() => handleReject(pendingApprovals[0].id)}>{t.workspace.reject}</button>
+              <div className="hud-section">
+                <div className="hud-section-title">Действия</div>
+                <div className="hud-actions-row">
+                  {latestActions.map((action: any, idx: number) => (
+                    <span key={`action-${idx}`} className="hud-chip">{action.type}</span>
+                  ))}
+                  {!latestActions.length && <span className="hud-chip muted">—</span>}
                 </div>
               </div>
-            )}
+
+              {!isOverlay && (
+                <div className="hud-section">
+                  <div className="hud-section-title">Журнал</div>
+                  <ul className="hud-list scrollable">
+                    {latestEvents.map((evt) => (
+                      <li key={`${evt.id}-${evt.seq}`}>
+                        <div className="hud-list-title">{label(t.events, evt.type, evt.type)}</div>
+                        <div className="hud-list-sub">{evt.message}</div>
+                      </li>
+                    ))}
+                    {!latestEvents.length && <li className="muted">{t.empty.events}</li>}
+                  </ul>
+                </div>
+              )}
+
+              {pendingApprovals[0] && (
+                <div className="hud-section hud-approval">
+                  <div className="hud-section-title">Подтверждение</div>
+                  <div className="hud-value">{pendingApprovals[0].title}</div>
+                  {pendingApprovals[0].description && <div className="hud-meta">{pendingApprovals[0].description}</div>}
+                  <div className="hud-row">
+                    <button className="primary" onClick={() => handleApprove(pendingApprovals[0].id)}>{t.workspace.approve}</button>
+                    <button className="danger" onClick={() => handleReject(pendingApprovals[0].id)}>{t.workspace.reject}</button>
+                  </div>
+                </div>
+              )}
 
               {isDone && (
                 <div className="hud-section">
@@ -733,23 +709,16 @@ function AstraHud() {
           />
           <input
             type="password"
-            placeholder={t.onboarding.passphrasePlaceholder}
-            value={vaultPassphrase}
-            onChange={(e) => setVaultPassphraseValue(e.target.value)}
-          />
-          <input
-            type="password"
             placeholder={t.onboarding.openaiKeyPlaceholder}
             value={openaiKey}
-            onChange={(e) => setOpenaiKey(e.target.value)}
+            onChange={(e) => setOpenaiKeyValue(e.target.value)}
           />
           <div className="hud-row">
             <button className="primary" disabled={savingVault} onClick={handleSaveProvider}>
-              {savingVault ? t.onboarding.saving : t.onboarding.saveProvider}
+              {savingVault ? t.onboarding.saving : "Сохранить в Keychain"}
             </button>
-            <button onClick={handleUnlockFromKeychain}>{t.onboarding.unlockVault}</button>
+            <button onClick={handleLoadFromKeychain}>Загрузить из Keychain</button>
           </div>
-          {vaultStatus && <div className="hud-meta">{vaultStatus}</div>}
         </div>
 
         <div className="hud-settings-section">

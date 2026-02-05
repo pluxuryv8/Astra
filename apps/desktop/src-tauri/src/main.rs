@@ -6,37 +6,25 @@ mod autopilot;
 #[cfg(feature = "desktop-skills")]
 mod skills;
 
-use rand::RngCore;
 use tauri::{GlobalShortcutManager, Manager};
 
-#[tauri::command]
-fn get_or_create_session_token() -> Result<String, String> {
-    // EN kept: идентификаторы keychain стабильны между версиями
-    let entry = keyring::Entry::new("randarc-astra", "session_token").map_err(|e| e.to_string())?;
-    if let Ok(token) = entry.get_password() {
-        return Ok(token);
-    }
-    let mut bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    let token = hex::encode(bytes);
-    entry.set_password(&token).map_err(|e| e.to_string())?;
-    Ok(token)
-}
+const KEYCHAIN_SERVICE: &str = "randarc-astra";
+const KEYCHAIN_ACCOUNT_API: &str = "astra-api-key";
 
 #[tauri::command]
-fn set_vault_passphrase(passphrase: String) -> Result<(), String> {
-    // EN kept: идентификаторы keychain стабильны между версиями
-    let entry = keyring::Entry::new("randarc-astra", "vault_passphrase").map_err(|e| e.to_string())?;
-    entry.set_password(&passphrase).map_err(|e| e.to_string())?;
+fn set_api_key(api_key: String) -> Result<(), String> {
+    // EN kept: фиксированные service/account для keychain
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_API).map_err(|e| e.to_string())?;
+    entry.set_password(&api_key).map_err(|e| e.to_string())?;
     Ok(())
 }
 
 #[tauri::command]
-fn get_vault_passphrase() -> Result<Option<String>, String> {
-    // EN kept: идентификаторы keychain стабильны между версиями
-    let entry = keyring::Entry::new("randarc-astra", "vault_passphrase").map_err(|e| e.to_string())?;
+fn get_api_key() -> Result<Option<String>, String> {
+    // EN kept: фиксированные service/account для keychain
+    let entry = keyring::Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT_API).map_err(|e| e.to_string())?;
     match entry.get_password() {
-        Ok(passphrase) => Ok(Some(passphrase)),
+        Ok(value) => Ok(Some(value)),
         Err(_) => Ok(None),
     }
 }
@@ -44,7 +32,7 @@ fn get_vault_passphrase() -> Result<Option<String>, String> {
 fn main() {
     bridge::start_bridge();
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![get_or_create_session_token, set_vault_passphrase, get_vault_passphrase, check_permissions])
+        .invoke_handler(tauri::generate_handler![set_api_key, get_api_key, check_permissions])
         .setup(|app| {
             let handle = app.handle();
             let mut shortcut_manager = handle.global_shortcut_manager();

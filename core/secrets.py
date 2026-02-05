@@ -5,6 +5,7 @@ from typing import Optional
 
 
 _runtime_passphrase: Optional[str] = None
+_runtime_secrets: dict[str, str] = {}
 
 
 def _vault_path() -> Optional[str]:
@@ -24,7 +25,13 @@ def get_runtime_passphrase() -> Optional[str]:
     return _runtime_passphrase
 
 
+def set_runtime_secret(key: str, value: str) -> None:
+    _runtime_secrets[key] = value
+
+
 def get_secret(key: str) -> Optional[str]:
+    if key in _runtime_secrets:
+        return _runtime_secrets[key]
     # Переменные окружения имеют приоритет для временного использования
     if os.getenv(key):
         return os.getenv(key)
