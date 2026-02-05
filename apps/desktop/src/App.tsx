@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   apiBase,
   listProjects,
@@ -67,9 +67,10 @@ const MODE_OPTIONS = [
   { value: "autopilot_safe", label: t.modes.autopilot_safe }
 ];
 
-const HUD_MODE_KEY = "astra_hud_mode";
-const HUD_COMPACT_SIZE_KEY = "astra_hud_compact_size";
-const HUD_COMPACT_POS_KEY = "astra_hud_compact_pos";
+const HUD_WINDOW_MODE = "astra_window_mode";
+const HUD_WINDOW_SIZE = "astra_window_size";
+const HUD_OVERLAY_SIZE = "astra_overlay_size";
+const HUD_OVERLAY_POS = "astra_overlay_pos";
 
 function label(map: Record<string, string>, key: string, fallback: string) {
   return map[key] || fallback;
@@ -126,13 +127,10 @@ function AstraHud() {
   const [loopDelayMs, setLoopDelayMs] = useState(650);
   const [maxActions, setMaxActions] = useState(6);
   const [maxCycles, setMaxCycles] = useState(30);
-  const [autoResize, setAutoResize] = useState(true);
-  const [hudMode, setHudMode] = useState<"full" | "compact">("full");
+  const [windowMode, setWindowMode] = useState<"window" | "overlay">("window");
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const refreshLock = useRef(false);
-  const shellRef = useRef<HTMLDivElement | null>(null);
-  const programmaticResize = useRef(false);
+  const eventSourceRef = React.useRef<EventSource | null>(null);
+  const refreshLock = React.useRef(false);
 
   useEffect(() => {
     initAuth()
@@ -187,109 +185,78 @@ function AstraHud() {
         await refreshSnapshot(run.id);
       }
     });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [run]);
-
-  useEffect(() => {
-    const unlisten = appWindow.onResized(() => {
-      if (programmaticResize.current) {
-        programmaticResize.current = false;
-        return;
-      }
-      setAutoResize(false);
+    const unlistenToggle = listen("toggle_hud_mode", async () => {
+      await toggleOverlayMode();
     });
     return () => {
       unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!autoResize || hudMode !== "compact") return;
-    const shell = shellRef.current;
-    if (!shell) return;
-    const rect = shell.getBoundingClientRect();
-    const targetHeight = Math.min(Math.max(rect.height + 24, 240), 860);
-    appWindow.innerSize().then((size) => {
-      programmaticResize.current = true;
-      appWindow.setSize(new LogicalSize(size.width, targetHeight));
-    });
-  }, [autoResize, hudMode, plan.length, tasks.length, approvals.length, events.length, autopilotState, settingsOpen, status, queryText]);
-
-  useEffect(() => {
-    const savedMode = (localStorage.getItem(HUD_MODE_KEY) as "full" | "compact") || "full";
-    setHudMode(savedMode);
-    if (savedMode === "compact") {
-      applyCompactMode();
-    } else {
-      applyFullMode();
-    }
-    const unlistenToggle = listen("toggle_hud_mode", () => {
-      toggleHudMode();
-    });
-    return () => {
       unlistenToggle.then((fn) => fn());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [run, windowMode]);
 
   useEffect(() => {
+    const saved = (localStorage.getItem(HUD_WINDOW_MODE) as "window" | "overlay") || "window";
+    if (saved === "overlay") {
+      applyOverlayMode();
+    } else {
+      applyWindowMode();
+    }
     const unlistenResize = appWindow.onResized(async () => {
-      if (programmaticResize.current) {
-        programmaticResize.current = false;
-        return;
-      }
-      if (hudMode === "compact") {
-        setAutoResize(false);
-        const size = await appWindow.innerSize();
-        localStorage.setItem(HUD_COMPACT_SIZE_KEY, JSON.stringify({ width: size.width, height: size.height }));
+      const size = await appWindow.innerSize();
+      if (windowMode === "overlay") {
+        localStorage.setItem(HUD_OVERLAY_SIZE, JSON.stringify({ width: size.width, height: size.height }));
+      } else {
+        localStorage.setItem(HUD_WINDOW_SIZE, JSON.stringify({ width: size.width, height: size.height }));
       }
     });
     const unlistenMove = appWindow.onMoved(async () => {
-      if (hudMode !== "compact") return;
+      if (windowMode !== "overlay") return;
       const pos = await appWindow.outerPosition();
-      localStorage.setItem(HUD_COMPACT_POS_KEY, JSON.stringify({ x: pos.x, y: pos.y }));
+      localStorage.setItem(HUD_OVERLAY_POS, JSON.stringify({ x: pos.x, y: pos.y }));
     });
     return () => {
       unlistenResize.then((fn) => fn());
       unlistenMove.then((fn) => fn());
     };
-  }, [hudMode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  async function applyFullMode() {
-    await appWindow.setFullscreen(true);
+  async function applyWindowMode() {
+    const sizeRaw = localStorage.getItem(HUD_WINDOW_SIZE);
+    const size = sizeRaw ? JSON.parse(sizeRaw) : { width: 900, height: 520 };
+    await appWindow.setDecorations(true);
+    await appWindow.setAlwaysOnTop(false);
+    await appWindow.setFullscreen(false);
     await appWindow.setResizable(true);
-    await appWindow.setAlwaysOnTop(true);
-    localStorage.setItem(HUD_MODE_KEY, "full");
-    setHudMode("full");
+    await appWindow.setMinSize(new LogicalSize(640, 360));
+    await appWindow.setSize(new LogicalSize(size.width, size.height));
+    localStorage.setItem(HUD_WINDOW_MODE, "window");
+    setWindowMode("window");
   }
 
-  async function applyCompactMode() {
-    const sizeRaw = localStorage.getItem(HUD_COMPACT_SIZE_KEY);
-    const posRaw = localStorage.getItem(HUD_COMPACT_POS_KEY);
+  async function applyOverlayMode() {
+    const sizeRaw = localStorage.getItem(HUD_OVERLAY_SIZE);
+    const posRaw = localStorage.getItem(HUD_OVERLAY_POS);
     const size = sizeRaw ? JSON.parse(sizeRaw) : { width: 520, height: 220 };
     const pos = posRaw ? JSON.parse(posRaw) : null;
-    await appWindow.setFullscreen(false);
+    await appWindow.setDecorations(false);
     await appWindow.setAlwaysOnTop(true);
+    await appWindow.setFullscreen(false);
+    await appWindow.setResizable(true);
     await appWindow.setMinSize(new LogicalSize(420, 200));
     await appWindow.setSize(new LogicalSize(size.width, size.height));
     if (pos) {
       await appWindow.setPosition(new LogicalPosition(pos.x, pos.y));
     }
-    localStorage.setItem(HUD_MODE_KEY, "compact");
-    setHudMode("compact");
+    localStorage.setItem(HUD_WINDOW_MODE, "overlay");
+    setWindowMode("overlay");
   }
 
-  async function toggleHudMode() {
-    if (hudMode === "full") {
-      const size = await appWindow.innerSize();
-      const pos = await appWindow.outerPosition();
-      localStorage.setItem(HUD_COMPACT_SIZE_KEY, JSON.stringify({ width: size.width, height: size.height }));
-      localStorage.setItem(HUD_COMPACT_POS_KEY, JSON.stringify({ x: pos.x, y: pos.y }));
-      await applyCompactMode();
+  async function toggleOverlayMode() {
+    if (windowMode === "overlay") {
+      await applyWindowMode();
     } else {
-      await applyFullMode();
+      await applyOverlayMode();
     }
   }
 
@@ -445,8 +412,8 @@ function AstraHud() {
     downloadBlob(blob, `отчет_${run.id}.md`);
   }
 
-  async function handleApprove(approvalId: string, decision?: { limit?: number; action?: string }) {
-    await approve(approvalId, decision);
+  async function handleApprove(approvalId: string) {
+    await approve(approvalId);
     if (run) await refreshSnapshot(run.id);
   }
 
@@ -533,21 +500,10 @@ function AstraHud() {
     return "ожидание";
   })();
 
-  const actionLabel = (value: string) => ({
-    move_mouse: "Движение мыши",
-    click: "Клик",
-    double_click: "Двойной клик",
-    drag: "Перетаскивание",
-    type: "Ввод",
-    key: "Горячие клавиши",
-    scroll: "Скролл",
-    wait: "Ожидание",
-  } as Record<string, string>)[value] || value;
-
-  const isCompact = hudMode === "compact";
-  const planLimit = isCompact ? 4 : 10;
-  const actionsLimit = isCompact ? 4 : 8;
-  const eventsLimit = isCompact ? 2 : 6;
+  const isOverlay = windowMode === "overlay";
+  const planLimit = isOverlay ? 5 : 12;
+  const actionsLimit = isOverlay ? 4 : 10;
+  const eventsLimit = isOverlay ? 2 : 6;
 
   const latestPlan = plan.slice(0, planLimit);
   const latestActions = (autopilotState?.actions || []).slice(0, actionsLimit);
@@ -574,24 +530,24 @@ function AstraHud() {
   const activeStep = plan.find((step) => step.status === "running") || plan[0];
 
   return (
-    <div className={`app hud-app mode-${uiMode} mode-${hudMode} ${settingsOpen ? "settings-open" : ""}`}>
-      <div className="hud-shell" ref={shellRef}>
-        <header className="hud-header" onMouseDown={() => appWindow.startDragging()}>
+    <div className={`app hud-app mode-${uiMode} mode-${windowMode} ${settingsOpen ? "settings-open" : ""}`}>
+      <div className="hud-shell">
+        <header className="hud-header">
           <div className="hud-brand">
             <div className="hud-title">Astra</div>
-            <div className="hud-subtitle">Randarc‑Astra</div>
           </div>
-          <div className={`hud-status status-${overlayStatus}`}>{overlayStatusLabel}</div>
-          <div className="hud-controls">
-            <button className="ghost" onMouseDown={(e) => e.stopPropagation()} onClick={() => setSettingsOpen((prev) => !prev)}>
-              {settingsOpen ? "Закрыть" : "Настройки"}
+          <div className="hud-actions">
+            <button className="icon-button" title="Настройки" onClick={() => setSettingsOpen((prev) => !prev)}>
+              ⚙︎
             </button>
-            <button onMouseDown={(e) => e.stopPropagation()} onClick={toggleHudMode}>
-              {hudMode === "full" ? "Свернуть" : "Развернуть"}
+            <button className="icon-button" title="Переключить режим" onClick={toggleOverlayMode}>
+              ⤢
             </button>
-            <button className="danger" onMouseDown={(e) => e.stopPropagation()} onClick={handleCancelRun}>
-              Стоп
-            </button>
+            {isActive && (
+              <button className="icon-button danger" title="Стоп" onClick={handleCancelRun}>
+                ■
+              </button>
+            )}
           </div>
         </header>
 
@@ -619,22 +575,22 @@ function AstraHud() {
 
         {uiMode !== "idle" && (
           <section className="hud-exec">
-            <div className="hud-card hud-live">
-              <div className="hud-label">Сейчас</div>
+            <div className="hud-section">
+              <div className="hud-section-title">Сейчас</div>
               <div className="hud-value">{autopilotState?.step_summary || activeStep?.title || "—"}</div>
               <div className="hud-meta">Статус: {phaseLabel}</div>
               <div className="hud-meta">Размышление: {autopilotState?.reason || "—"}</div>
               <div className="hud-meta">Цель: {autopilotState?.goal || run?.query_text || "—"}</div>
             </div>
 
-            <div className="hud-card hud-tasklist">
-              <div className="hud-label">Задачи</div>
-              <ul className="hud-list">
+            <div className="hud-section">
+              <div className="hud-section-title">Задачи</div>
+              <ul className="hud-list scrollable">
                 {latestPlan.map((step) => (
                   <li key={step.id}>
                     <div className="hud-list-title">{step.step_index + 1}. {step.title}</div>
                     <div className={`hud-list-sub status-${step.status}`}>{stepStatusLabel(step)}</div>
-                    {!isCompact && tasksByStep.get(step.id)?.length ? (
+                    {!isOverlay && tasksByStep.get(step.id)?.length ? (
                       <ul className="hud-sublist">
                         {tasksByStep.get(step.id)!.slice(0, 3).map((task) => (
                           <li key={task.id}>
@@ -654,24 +610,20 @@ function AstraHud() {
               </ul>
             </div>
 
-            <div className="hud-grid">
-              <div className="hud-card">
-                <div className="hud-label">Действия</div>
-                <div className="hud-actions">
+            <div className="hud-section">
+              <div className="hud-section-title">Действия</div>
+              <div className="hud-actions-row">
                 {latestActions.map((action: any, idx: number) => (
-                  <span key={`action-${idx}`} className="hud-chip">{actionLabel(action.type)}</span>
+                  <span key={`action-${idx}`} className="hud-chip">{action.type}</span>
                 ))}
                 {!latestActions.length && <span className="hud-chip muted">—</span>}
               </div>
-                {!isCompact && recentActions.length > 0 && (
-                  <div className="hud-mini">Последние: {recentActions.slice(0, 3).map((a) => actionLabel(a.action?.type || "")).join(" · ")}</div>
-                )}
-              </div>
+            </div>
 
-              {!isCompact && (
-              <div className="hud-card">
-                <div className="hud-label">Журнал</div>
-                <ul className="hud-list">
+            {!isOverlay && (
+              <div className="hud-section">
+                <div className="hud-section-title">Журнал</div>
+                <ul className="hud-list scrollable">
                   {latestEvents.map((evt) => (
                     <li key={`${evt.id}-${evt.seq}`}>
                       <div className="hud-list-title">{label(t.events, evt.type, evt.type)}</div>
@@ -681,12 +633,11 @@ function AstraHud() {
                   {!latestEvents.length && <li className="muted">{t.empty.events}</li>}
                 </ul>
               </div>
-              )}
-            </div>
+            )}
 
             {pendingApprovals[0] && (
-              <div className="hud-card hud-approval">
-                <div className="hud-label">Подтверждение</div>
+              <div className="hud-section hud-approval">
+                <div className="hud-section-title">Подтверждение</div>
                 <div className="hud-value">{pendingApprovals[0].title}</div>
                 {pendingApprovals[0].description && <div className="hud-meta">{pendingApprovals[0].description}</div>}
                 <div className="hud-row">
@@ -697,37 +648,36 @@ function AstraHud() {
             )}
 
             {isDone && (
-              <div className="hud-card hud-done">
-                <div className="hud-label">Итог</div>
+              <div className="hud-section">
+                <div className="hud-section-title">Итог</div>
                 <div className="hud-value">{overlayStatusLabel}</div>
-                <div className="hud-row">
-                  <button className="ghost" onClick={() => setRun(null)}>Новая команда</button>
-                </div>
               </div>
             )}
           </section>
         )}
 
-        <footer className="hud-footer">
-          <span className="hud-pill">{t.labels.coverage} {formatCoverage(metrics)}</span>
-          <span className="hud-pill">{t.labels.conflicts} {metrics?.conflicts ?? 0}</span>
-          <span className="hud-pill">{t.labels.freshness} {formatFreshness(metrics)}</span>
-          <span className="hud-pill">{t.labels.approvals} {pendingApprovals.length}</span>
-          <button className="ghost" onClick={handleExportSnapshot} disabled={!run}>{t.workspace.exportJson}</button>
-          <button className="ghost" onClick={handleExportReport} disabled={!reportArtifact}>{t.workspace.exportMd}</button>
-        </footer>
+        {uiMode !== "idle" && !isOverlay && (
+          <footer className="hud-footer">
+            <span className="hud-pill">{t.labels.coverage} {formatCoverage(metrics)}</span>
+            <span className="hud-pill">{t.labels.conflicts} {metrics?.conflicts ?? 0}</span>
+            <span className="hud-pill">{t.labels.freshness} {formatFreshness(metrics)}</span>
+            <span className="hud-pill">{t.labels.approvals} {pendingApprovals.length}</span>
+            <button className="ghost" onClick={handleExportSnapshot} disabled={!run}>{t.workspace.exportJson}</button>
+            <button className="ghost" onClick={handleExportReport} disabled={!reportArtifact}>{t.workspace.exportMd}</button>
+          </footer>
+        )}
 
         {status && <div className="hud-toast">{status}</div>}
       </div>
 
-      <aside className={`hud-settings ${settingsOpen ? "open" : ""}`} onMouseDown={(e) => e.stopPropagation()}>
+      <aside className={`hud-settings ${settingsOpen ? "open" : ""}`}>
         <div className="hud-settings-header">
-          <div className="hud-label">Настройки</div>
+          <div className="hud-section-title">Настройки</div>
           <button className="ghost" onClick={() => setSettingsOpen(false)}>Закрыть</button>
         </div>
 
         <div className="hud-settings-section">
-          <div className="hud-label">Проект</div>
+          <div className="hud-section-title">Проект</div>
           {projects.length > 0 ? (
             <select value={selectedProject?.id || ""} onChange={(e) => setSelectedProject(projects.find((p) => p.id === e.target.value))}>
               {projects.map((project) => (
@@ -740,7 +690,7 @@ function AstraHud() {
         </div>
 
         <div className="hud-settings-section">
-          <div className="hud-label">Режим</div>
+          <div className="hud-section-title">Режим</div>
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
             {MODE_OPTIONS.map((m) => (
               <option key={m.value} value={m.value}>{m.label}</option>
@@ -749,44 +699,23 @@ function AstraHud() {
         </div>
 
         <div className="hud-settings-section">
-          <div className="hud-label">Автопилот</div>
-          <div className="hud-row">
-            <input
-              type="number"
-              min={200}
-              max={3000}
-              value={loopDelayMs}
-              onChange={(e) => setLoopDelayMs(Number(e.target.value))}
-            />
-            <div className="hud-meta">Интервал цикла, мс</div>
-          </div>
-          <div className="hud-row">
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={maxActions}
-              onChange={(e) => setMaxActions(Number(e.target.value))}
-            />
-            <div className="hud-meta">Действий за цикл</div>
-          </div>
-          <div className="hud-row">
-            <input
-              type="number"
-              min={1}
-              max={120}
-              value={maxCycles}
-              onChange={(e) => setMaxCycles(Number(e.target.value))}
-            />
-            <div className="hud-meta">Лимит циклов</div>
-          </div>
-          <button className="ghost" onClick={() => setAutoResize((prev) => !prev)}>
-            Авторазмер: {autoResize ? "вкл" : "выкл"}
-          </button>
+          <div className="hud-section-title">Автопилот</div>
+          <label className="hud-field">
+            <span>Интервал цикла (мс)</span>
+            <input type="number" min={200} max={3000} value={loopDelayMs} onChange={(e) => setLoopDelayMs(Number(e.target.value))} />
+          </label>
+          <label className="hud-field">
+            <span>Действий за цикл</span>
+            <input type="number" min={1} max={10} value={maxActions} onChange={(e) => setMaxActions(Number(e.target.value))} />
+          </label>
+          <label className="hud-field">
+            <span>Лимит циклов</span>
+            <input type="number" min={1} max={120} value={maxCycles} onChange={(e) => setMaxCycles(Number(e.target.value))} />
+          </label>
         </div>
 
         <div className="hud-settings-section">
-          <div className="hud-label">OpenAI</div>
+          <div className="hud-section-title">OpenAI</div>
           <input
             type="text"
             placeholder="Модель (например gpt-4.1-mini)"
@@ -815,7 +744,7 @@ function AstraHud() {
         </div>
 
         <div className="hud-settings-section">
-          <div className="hud-label">Разрешения macOS</div>
+          <div className="hud-section-title">Разрешения macOS</div>
           <div className="hud-meta">{permissions ? permissions.message : t.onboarding.permissionsUnknown}</div>
           <button onClick={async () => setPermissions(await checkPermissions())}>{t.onboarding.permissionsCheck}</button>
         </div>
