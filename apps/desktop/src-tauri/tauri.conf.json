@@ -29,13 +29,14 @@
       {
         "label": "overlay",
         "title": "Randarc-Astra Overlay",
-        "width": 420,
-        "height": 520,
-        "resizable": true,
+        "width": 300,
+        "height": 360,
+        "resizable": false,
         "transparent": true,
         "decorations": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
+        "visible": false,
         "url": "index.html?overlay=1"
       }
     ],

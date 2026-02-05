@@ -29,6 +29,7 @@ import {
 } from "./api";
 import { ru } from "./i18n/ru";
 import { listen } from "@tauri-apps/api/event";
+import { WebviewWindow, appWindow } from "@tauri-apps/api/window";
 
 const t = ru;
 const isOverlay = new URLSearchParams(window.location.search).get("overlay") === "1";
@@ -181,6 +182,26 @@ function MainView() {
     setProjects((prev) => [project, ...prev]);
     setProjectName("");
     setProjectTags("");
+  }
+
+  async function handleOpenOverlay() {
+    const existing = WebviewWindow.getByLabel("overlay");
+    if (existing) {
+      await existing.show();
+      await existing.setFocus();
+      return;
+    }
+    const win = new WebviewWindow("overlay", {
+      url: "index.html?overlay=1",
+      width: 300,
+      height: 360,
+      decorations: false,
+      transparent: true,
+      alwaysOnTop: true,
+      resizable: false,
+      skipTaskbar: true
+    });
+    win.once("tauri://created", () => {});
   }
 
   async function applyOpenAISettings(projectsList: any[]) {
@@ -515,6 +536,7 @@ function MainView() {
                   <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
               </select>
+              <button onClick={handleOpenOverlay}>{t.workspace.openOverlay}</button>
               <button className="ghost" onClick={handleCancelRun}>{t.workspace.stopRun}</button>
               <button onClick={handleExportSnapshot} disabled={!run}>{t.workspace.exportJson}</button>
               <button onClick={handleExportReport} disabled={!reportArtifact}>{t.workspace.exportMd}</button>
@@ -857,14 +879,19 @@ function OverlayView() {
 
   return (
     <div className={`overlay ${expanded ? "expanded" : "collapsed"}`} onDoubleClick={() => setExpanded(!expanded)}>
-      <div className="overlay-header">
+      <div className="overlay-header" onMouseDown={() => appWindow.startDragging()}>
         <div className="overlay-brand">
           <div className="overlay-title">Randarc-Astra</div>
           <div className={`overlay-status-pill status-${overlayStatus}`}>{overlayStatusLabel}</div>
         </div>
         <div className="overlay-controls">
-          <button className="ghost" onClick={() => setExpanded(!expanded)}>{expanded ? "Свернуть" : "Развернуть"}</button>
-          <button className="danger" onClick={handleStop}>Стоп</button>
+          <button className="ghost" onMouseDown={(e) => e.stopPropagation()} onClick={() => setExpanded(!expanded)}>
+            {expanded ? "Свернуть" : "Развернуть"}
+          </button>
+          <button onMouseDown={(e) => e.stopPropagation()} onClick={() => appWindow.hide()}>
+            Скрыть
+          </button>
+          <button className="danger" onMouseDown={(e) => e.stopPropagation()} onClick={handleStop}>Стоп</button>
         </div>
       </div>
       {expanded && (

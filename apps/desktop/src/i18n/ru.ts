@@ -46,6 +46,7 @@ export const ru = {
     createPlan: "Показать план",
     startRun: "Старт",
     stopRun: "Стоп",
+    openOverlay: "Оверлей",
     planTitle: "План",
     tasksTitle: "Задачи",
     approvalsTitle: "Подтверждения",
