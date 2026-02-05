@@ -26,7 +26,7 @@ import {
 } from "./api";
 import { ru } from "./i18n/ru";
 import { listen } from "@tauri-apps/api/event";
-import { appWindow, LogicalSize } from "@tauri-apps/api/window";
+import { appWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 
 const t = ru;
 
@@ -66,6 +66,10 @@ const MODE_OPTIONS = [
   { value: "execute_confirm", label: t.modes.execute_confirm },
   { value: "autopilot_safe", label: t.modes.autopilot_safe }
 ];
+
+const HUD_MODE_KEY = "astra_hud_mode";
+const HUD_COMPACT_SIZE_KEY = "astra_hud_compact_size";
+const HUD_COMPACT_POS_KEY = "astra_hud_compact_pos";
 
 function label(map: Record<string, string>, key: string, fallback: string) {
   return map[key] || fallback;
@@ -123,6 +127,7 @@ function AstraHud() {
   const [maxActions, setMaxActions] = useState(6);
   const [maxCycles, setMaxCycles] = useState(30);
   const [autoResize, setAutoResize] = useState(true);
+  const [hudMode, setHudMode] = useState<"full" | "compact">("full");
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const refreshLock = useRef(false);
@@ -201,7 +206,7 @@ function AstraHud() {
   }, []);
 
   useLayoutEffect(() => {
-    if (!autoResize) return;
+    if (!autoResize || hudMode !== "compact") return;
     const shell = shellRef.current;
     if (!shell) return;
     const rect = shell.getBoundingClientRect();
@@ -210,7 +215,83 @@ function AstraHud() {
       programmaticResize.current = true;
       appWindow.setSize(new LogicalSize(size.width, targetHeight));
     });
-  }, [autoResize, plan.length, tasks.length, approvals.length, events.length, autopilotState, settingsOpen, status, queryText]);
+  }, [autoResize, hudMode, plan.length, tasks.length, approvals.length, events.length, autopilotState, settingsOpen, status, queryText]);
+
+  useEffect(() => {
+    const savedMode = (localStorage.getItem(HUD_MODE_KEY) as "full" | "compact") || "full";
+    setHudMode(savedMode);
+    if (savedMode === "compact") {
+      applyCompactMode();
+    } else {
+      applyFullMode();
+    }
+    const unlistenToggle = listen("toggle_hud_mode", () => {
+      toggleHudMode();
+    });
+    return () => {
+      unlistenToggle.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const unlistenResize = appWindow.onResized(async () => {
+      if (programmaticResize.current) {
+        programmaticResize.current = false;
+        return;
+      }
+      if (hudMode === "compact") {
+        setAutoResize(false);
+        const size = await appWindow.innerSize();
+        localStorage.setItem(HUD_COMPACT_SIZE_KEY, JSON.stringify({ width: size.width, height: size.height }));
+      }
+    });
+    const unlistenMove = appWindow.onMoved(async () => {
+      if (hudMode !== "compact") return;
+      const pos = await appWindow.outerPosition();
+      localStorage.setItem(HUD_COMPACT_POS_KEY, JSON.stringify({ x: pos.x, y: pos.y }));
+    });
+    return () => {
+      unlistenResize.then((fn) => fn());
+      unlistenMove.then((fn) => fn());
+    };
+  }, [hudMode]);
+
+  async function applyFullMode() {
+    await appWindow.setFullscreen(true);
+    await appWindow.setResizable(true);
+    await appWindow.setAlwaysOnTop(true);
+    localStorage.setItem(HUD_MODE_KEY, "full");
+    setHudMode("full");
+  }
+
+  async function applyCompactMode() {
+    const sizeRaw = localStorage.getItem(HUD_COMPACT_SIZE_KEY);
+    const posRaw = localStorage.getItem(HUD_COMPACT_POS_KEY);
+    const size = sizeRaw ? JSON.parse(sizeRaw) : { width: 520, height: 220 };
+    const pos = posRaw ? JSON.parse(posRaw) : null;
+    await appWindow.setFullscreen(false);
+    await appWindow.setAlwaysOnTop(true);
+    await appWindow.setMinSize(new LogicalSize(420, 200));
+    await appWindow.setSize(new LogicalSize(size.width, size.height));
+    if (pos) {
+      await appWindow.setPosition(new LogicalPosition(pos.x, pos.y));
+    }
+    localStorage.setItem(HUD_MODE_KEY, "compact");
+    setHudMode("compact");
+  }
+
+  async function toggleHudMode() {
+    if (hudMode === "full") {
+      const size = await appWindow.innerSize();
+      const pos = await appWindow.outerPosition();
+      localStorage.setItem(HUD_COMPACT_SIZE_KEY, JSON.stringify({ width: size.width, height: size.height }));
+      localStorage.setItem(HUD_COMPACT_POS_KEY, JSON.stringify({ x: pos.x, y: pos.y }));
+      await applyCompactMode();
+    } else {
+      await applyFullMode();
+    }
+  }
 
   async function loadProjects() {
     const data = await listProjects();
@@ -443,6 +524,15 @@ function AstraHud() {
     idle: "Ожидание",
   } as Record<string, string>)[overlayStatus] || label(t.runStatus, overlayStatus, overlayStatus);
 
+  const phaseLabel = (() => {
+    const phase = autopilotState?.phase;
+    if (phase === "thinking") return "думает";
+    if (phase === "acting") return "делает";
+    if (overlayStatus === "waiting_confirm") return "ждёт подтверждение";
+    if (overlayStatus === "needs_user") return "нужна помощь";
+    return "ожидание";
+  })();
+
   const actionLabel = (value: string) => ({
     move_mouse: "Движение мыши",
     click: "Клик",
@@ -454,9 +544,14 @@ function AstraHud() {
     wait: "Ожидание",
   } as Record<string, string>)[value] || value;
 
-  const latestPlan = plan.slice(0, 8);
-  const latestActions = (autopilotState?.actions || []).slice(0, 6);
-  const latestEvents = events.slice(0, 4);
+  const isCompact = hudMode === "compact";
+  const planLimit = isCompact ? 4 : 10;
+  const actionsLimit = isCompact ? 4 : 8;
+  const eventsLimit = isCompact ? 2 : 6;
+
+  const latestPlan = plan.slice(0, planLimit);
+  const latestActions = (autopilotState?.actions || []).slice(0, actionsLimit);
+  const latestEvents = events.slice(0, eventsLimit);
 
   const tasksByStep = useMemo(() => {
     const map = new Map<string, any[]>();
@@ -479,7 +574,7 @@ function AstraHud() {
   const activeStep = plan.find((step) => step.status === "running") || plan[0];
 
   return (
-    <div className={`app hud-app mode-${uiMode} ${settingsOpen ? "settings-open" : ""}`}>
+    <div className={`app hud-app mode-${uiMode} mode-${hudMode} ${settingsOpen ? "settings-open" : ""}`}>
       <div className="hud-shell" ref={shellRef}>
         <header className="hud-header" onMouseDown={() => appWindow.startDragging()}>
           <div className="hud-brand">
@@ -491,8 +586,8 @@ function AstraHud() {
             <button className="ghost" onMouseDown={(e) => e.stopPropagation()} onClick={() => setSettingsOpen((prev) => !prev)}>
               {settingsOpen ? "Закрыть" : "Настройки"}
             </button>
-            <button onMouseDown={(e) => e.stopPropagation()} onClick={() => appWindow.hide()}>
-              Скрыть
+            <button onMouseDown={(e) => e.stopPropagation()} onClick={toggleHudMode}>
+              {hudMode === "full" ? "Свернуть" : "Развернуть"}
             </button>
             <button className="danger" onMouseDown={(e) => e.stopPropagation()} onClick={handleCancelRun}>
               Стоп
@@ -527,6 +622,7 @@ function AstraHud() {
             <div className="hud-card hud-live">
               <div className="hud-label">Сейчас</div>
               <div className="hud-value">{autopilotState?.step_summary || activeStep?.title || "—"}</div>
+              <div className="hud-meta">Статус: {phaseLabel}</div>
               <div className="hud-meta">Размышление: {autopilotState?.reason || "—"}</div>
               <div className="hud-meta">Цель: {autopilotState?.goal || run?.query_text || "—"}</div>
             </div>
@@ -538,7 +634,7 @@ function AstraHud() {
                   <li key={step.id}>
                     <div className="hud-list-title">{step.step_index + 1}. {step.title}</div>
                     <div className={`hud-list-sub status-${step.status}`}>{stepStatusLabel(step)}</div>
-                    {tasksByStep.get(step.id)?.length ? (
+                    {!isCompact && tasksByStep.get(step.id)?.length ? (
                       <ul className="hud-sublist">
                         {tasksByStep.get(step.id)!.slice(0, 3).map((task) => (
                           <li key={task.id}>
@@ -562,16 +658,17 @@ function AstraHud() {
               <div className="hud-card">
                 <div className="hud-label">Действия</div>
                 <div className="hud-actions">
-                  {latestActions.map((action: any, idx: number) => (
-                    <span key={`action-${idx}`} className="hud-chip">{actionLabel(action.type)}</span>
-                  ))}
-                  {!latestActions.length && <span className="hud-chip muted">—</span>}
-                </div>
-                {recentActions.length > 0 && (
+                {latestActions.map((action: any, idx: number) => (
+                  <span key={`action-${idx}`} className="hud-chip">{actionLabel(action.type)}</span>
+                ))}
+                {!latestActions.length && <span className="hud-chip muted">—</span>}
+              </div>
+                {!isCompact && recentActions.length > 0 && (
                   <div className="hud-mini">Последние: {recentActions.slice(0, 3).map((a) => actionLabel(a.action?.type || "")).join(" · ")}</div>
                 )}
               </div>
 
+              {!isCompact && (
               <div className="hud-card">
                 <div className="hud-label">Журнал</div>
                 <ul className="hud-list">
@@ -584,6 +681,7 @@ function AstraHud() {
                   {!latestEvents.length && <li className="muted">{t.empty.events}</li>}
                 </ul>
               </div>
+              )}
             </div>
 
             {pendingApprovals[0] && (

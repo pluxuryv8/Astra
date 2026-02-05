@@ -51,6 +51,10 @@ fn main() {
             let _ = shortcut_manager.register("Cmd+Shift+S", move || {
                 let _ = handle.emit_all("autopilot_stop_hotkey", {});
             });
+            let handle_toggle = app.handle();
+            let _ = shortcut_manager.register("Cmd+Shift+O", move || {
+                let _ = handle_toggle.emit_all("toggle_hud_mode", {});
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
