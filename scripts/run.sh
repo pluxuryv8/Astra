@@ -45,8 +45,18 @@ fi
 
 # shellcheck disable=SC1091
 source .venv/bin/activate
-python -m pip install -U pip >/dev/null
-python -m pip install -r apps/api/requirements.txt >/dev/null
+
+PYTHON_VENV="$VIRTUAL_ENV/bin/python3"
+if [ ! -x "$PYTHON_VENV" ]; then
+  PYTHON_VENV="$VIRTUAL_ENV/bin/python"
+fi
+if [ ! -x "$PYTHON_VENV" ]; then
+  echo "В .venv не найден python. Пересоздай .venv" >&2
+  exit 1
+fi
+
+"$PYTHON_VENV" -m pip install -U pip >/dev/null
+"$PYTHON_VENV" -m pip install -r apps/api/requirements.txt >/dev/null
 
 npm --prefix apps/desktop install >/dev/null
 
@@ -70,7 +80,7 @@ if [ "$MODE" = "background" ]; then
   if check_api; then
     echo "API уже запущен на порту $API_PORT"
   else
-    python -m uvicorn apps.api.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG_DIR/api.log" 2>&1 &
+    "$PYTHON_VENV" -m uvicorn apps.api.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG_DIR/api.log" 2>&1 &
     API_PID=$!
     echo "$API_PID" > .astra/api.pid
 
@@ -104,7 +114,7 @@ trap cleanup EXIT
 if check_api; then
   echo "API уже запущен на порту $API_PORT"
 else
-  python -m uvicorn apps.api.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG_DIR/api.log" 2>&1 &
+  "$PYTHON_VENV" -m uvicorn apps.api.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG_DIR/api.log" 2>&1 &
   API_PID=$!
 
   for _ in {1..20}; do
