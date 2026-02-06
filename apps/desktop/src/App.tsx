@@ -8,8 +8,6 @@ import {
   createPlan,
   startRun,
   cancelRun,
-  pauseRun,
-  resumeRun,
   getSnapshot,
   initAuth,
   checkApiStatus,
@@ -18,15 +16,11 @@ import {
   storeOpenAIKeyLocal,
   getLocalOpenAIStatus,
   approve,
-  reject,
-  retryStep,
-  downloadArtifact,
-  downloadSnapshot
+  reject
 } from "./api";
 import { ru } from "./i18n/ru";
 import { listen } from "@tauri-apps/api/event";
 import { appWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
-import { invoke } from "@tauri-apps/api/tauri";
 
 const t = ru;
 
@@ -73,53 +67,153 @@ const HUD_OVERLAY_SIZE = "astra_overlay_size";
 const HUD_OVERLAY_POS = "astra_overlay_pos";
 const SETTINGS_VIEW = "settings";
 
-function label(map: Record<string, string>, key: string, fallback: string) {
-  return map[key] || fallback;
-}
-
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  URL.revokeObjectURL(url);
+function statusLabel(status?: string | null) {
+  if (!status || status === "created") return "Ожидание";
+  if (status === "running") return "В работе";
+  if (status === "paused") return "Пауза";
+  if (status === "done") return "Готово";
+  if (status === "failed") return "Ошибка";
+  if (status === "canceled") return "Отменено";
+  return status;
 }
 
-function formatFreshness(metrics: any) {
-  const freshness = metrics?.freshness;
-  if (!freshness || !freshness.max) return t.labels.freshnessEmpty;
-  try {
-    const date = new Date(freshness.max);
-    return date.toLocaleString("ru-RU");
-  } catch {
-    return freshness.max;
+function HeaderOverlay({
+  onHide,
+  onMinimize,
+  onStop,
+  showStop
+}: {
+  onHide: () => void;
+  onMinimize: () => void;
+  onStop: () => void;
+  showStop: boolean;
+}) {
+  return (
+    <div className="overlay-topbar" aria-hidden="true">
+      <div className="overlay-topbar-inner">
+        <button className="overlay-btn" onClick={onHide} title="Скрыть">Скрыть</button>
+        <button className="overlay-btn" onClick={onMinimize} title="Свернуть">Свернуть</button>
+        <button className={`overlay-btn ${showStop ? "danger" : "muted"}`} onClick={onStop} disabled={!showStop} title="Стоп">
+          Стоп
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function PromptInput({
+  value,
+  disabled,
+  onChange,
+  onSubmit,
+  status
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+  status?: string | null;
+}) {
+  return (
+    <section className="hud-idle">
+      <div className="hud-idle-title">ASTRA</div>
+      <div className="hud-idle-subtitle">Чем займёмся?</div>
+      <div className="hud-input-row">
+        <input
+          className="hud-input"
+          type="text"
+          placeholder="Коротко: что нужно сделать"
+          value={value}
+          disabled={disabled}
+          onChange={(e) => onChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onSubmit();
+            }
+          }}
+        />
+        <button className="send-button" title="Запустить" onClick={onSubmit} disabled={disabled}>
+          ➤
+        </button>
+      </div>
+      {status ? <div className="hud-status-line">{status}</div> : null}
+    </section>
+  );
+}
+
+function StatusLine({ title, subtitle, status }: { title: string; subtitle?: string; status: string }) {
+  return (
+    <section className="hud-status">
+      <div className="hud-status-title">{title}</div>
+      {subtitle ? <div className="hud-status-subtitle">{subtitle}</div> : null}
+      <div className="hud-status-chip">{status}</div>
+    </section>
+  );
+}
+
+function TaskList({ steps }: { steps: any[] }) {
+  if (!steps.length) {
+    return (
+      <section className="hud-section">
+        <div className="hud-section-title">Задачи</div>
+        <div className="hud-meta">План пока пустой</div>
+      </section>
+    );
   }
+  return (
+    <section className="hud-section">
+      <div className="hud-section-title">Задачи</div>
+      <ul className="hud-list scrollable">
+        {steps.map((step) => (
+          <li key={step.id} className="hud-list-item">
+            <div className="hud-list-title">
+              {step.step_index + 1}. {step.title}
+            </div>
+            <div className={`hud-list-sub status-${step.status}`}>{statusLabel(step.status)}</div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
-function formatCoverage(metrics: any) {
-  const coverage = metrics?.coverage;
-  if (!coverage) return "0/0";
-  return `${coverage.done}/${coverage.total}`;
+function ConfirmCard({ approval, onApprove, onReject }: { approval: any; onApprove: () => void; onReject: () => void }) {
+  if (!approval) return null;
+  return (
+    <section className="hud-section hud-approval">
+      <div className="hud-section-title">Подтверждение</div>
+      <div className="hud-value">{approval.title}</div>
+      {approval.description ? <div className="hud-meta">{approval.description}</div> : null}
+      <div className="hud-row">
+        <button className="primary" onClick={onApprove}>Разрешить</button>
+        <button className="danger" onClick={onReject}>Отказать</button>
+      </div>
+    </section>
+  );
 }
 
-function AstraHud() {
+function ResultCard({ status }: { status: string }) {
+  return (
+    <section className="hud-section">
+      <div className="hud-section-title">Итог</div>
+      <div className="hud-value">{status}</div>
+    </section>
+  );
+}
+
+export default function App() {
   const isSettingsView = new URLSearchParams(window.location.search).get("view") === SETTINGS_VIEW;
   const [projects, setProjects] = useState<any[]>([]);
   const [selectedProject, setSelectedProject] = useState<any | null>(null);
   const [run, setRun] = useState<any | null>(null);
   const [plan, setPlan] = useState<any[]>([]);
-  const [tasks, setTasks] = useState<any[]>([]);
   const [approvals, setApprovals] = useState<any[]>([]);
-  const [artifacts, setArtifacts] = useState<any[]>([]);
-  const [events, setEvents] = useState<any[]>([]);
-  const [metrics, setMetrics] = useState<any | null>(null);
   const [autopilotState, setAutopilotState] = useState<any | null>(null);
-  const [recentActions, setRecentActions] = useState<any[]>([]);
   const [queryText, setQueryText] = useState("");
   const [mode, setMode] = useState("execute_confirm");
   const [status, setStatus] = useState<string | null>(null);
@@ -160,6 +254,22 @@ function AstraHud() {
   }, []);
 
   useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (settingsOpen || isSettingsView) {
+          closeSettingsWindow();
+        }
+      }
+      if (event.metaKey && event.key === ",") {
+        event.preventDefault();
+        setSettingsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [settingsOpen, isSettingsView]);
+
+  useEffect(() => {
     const checkApi = async () => {
       const ok = await checkApiStatus();
       setApiAvailable(ok);
@@ -195,15 +305,15 @@ function AstraHud() {
       if (settingsOpen) {
         const size = await appWindow.innerSize();
         settingsSizeRef.current = { width: size.width, height: size.height };
-        const targetWidth = Math.max(size.width, 980);
-        const targetHeight = Math.max(size.height, 700);
+        const targetWidth = Math.max(size.width, 900);
+        const targetHeight = Math.max(size.height, 640);
         if (windowMode === "overlay") {
           settingsPrevModeRef.current = "overlay";
           await applyWindowMode(false, { width: targetWidth, height: targetHeight });
           await sleep(120);
           await appWindow.setSize(new LogicalSize(targetWidth, targetHeight));
         } else {
-          await appWindow.setMinSize(new LogicalSize(820, 520));
+          await appWindow.setMinSize(new LogicalSize(760, 520));
           await sleep(80);
           await appWindow.setSize(new LogicalSize(targetWidth, targetHeight));
           await sleep(80);
@@ -218,7 +328,7 @@ function AstraHud() {
           await sleep(80);
           await appWindow.setSize(new LogicalSize(prev.width, prev.height));
         } else {
-          await appWindow.setMinSize(windowMode === "overlay" ? new LogicalSize(420, 200) : new LogicalSize(640, 360));
+          await appWindow.setMinSize(windowMode === "overlay" ? new LogicalSize(420, 200) : new LogicalSize(520, 320));
           await sleep(80);
           await appWindow.setSize(new LogicalSize(prev.width, prev.height));
         }
@@ -252,7 +362,7 @@ function AstraHud() {
 
   useEffect(() => {
     if (isSettingsView) return;
-    const unlisten = listen("autopilot_stop_hotkey", async () => {
+    const unlistenStop = listen("autopilot_stop_hotkey", async () => {
       if (run) {
         await cancelRun(run.id);
         await refreshSnapshot(run.id);
@@ -261,9 +371,13 @@ function AstraHud() {
     const unlistenToggle = listen("toggle_hud_mode", async () => {
       await toggleOverlayMode();
     });
+    const unlistenHide = listen("overlay_hide_hotkey", async () => {
+      await appWindow.hide();
+    });
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenStop.then((fn) => fn());
       unlistenToggle.then((fn) => fn());
+      unlistenHide.then((fn) => fn());
     };
   }, [run, windowMode, isSettingsView]);
 
@@ -297,15 +411,15 @@ function AstraHud() {
 
   async function applyWindowMode(persist = true, overrideSize?: { width: number; height: number }) {
     const sizeRaw = localStorage.getItem(HUD_WINDOW_SIZE);
-    const size = overrideSize || (sizeRaw ? JSON.parse(sizeRaw) : { width: 900, height: 520 });
+    const size = overrideSize || (sizeRaw ? JSON.parse(sizeRaw) : { width: 640, height: 420 });
     await appWindow.setDecorations(true);
     await appWindow.setAlwaysOnTop(false);
     await appWindow.setFullscreen(false);
     await appWindow.setResizable(true);
-    await appWindow.setMinSize(new LogicalSize(640, 360));
-    await sleep(80);
+    await appWindow.setMinSize(new LogicalSize(520, 320));
+    await sleep(60);
     await appWindow.setSize(new LogicalSize(size.width, size.height));
-    await sleep(80);
+    await sleep(60);
     await appWindow.setSize(new LogicalSize(size.width, size.height));
     if (persist) {
       localStorage.setItem(HUD_WINDOW_MODE, "window");
@@ -316,16 +430,16 @@ function AstraHud() {
   async function applyOverlayMode(persist = true) {
     const sizeRaw = localStorage.getItem(HUD_OVERLAY_SIZE);
     const posRaw = localStorage.getItem(HUD_OVERLAY_POS);
-    const size = sizeRaw ? JSON.parse(sizeRaw) : { width: 520, height: 220 };
+    const size = sizeRaw ? JSON.parse(sizeRaw) : { width: 460, height: 260 };
     const pos = posRaw ? JSON.parse(posRaw) : null;
     await appWindow.setDecorations(false);
     await appWindow.setAlwaysOnTop(true);
     await appWindow.setFullscreen(false);
     await appWindow.setResizable(true);
-    await appWindow.setMinSize(new LogicalSize(420, 200));
-    await sleep(80);
+    await appWindow.setMinSize(new LogicalSize(420, 220));
+    await sleep(60);
     await appWindow.setSize(new LogicalSize(size.width, size.height));
-    await sleep(80);
+    await sleep(60);
     await appWindow.setSize(new LogicalSize(size.width, size.height));
     if (pos) {
       await appWindow.setPosition(new LogicalPosition(pos.x, pos.y));
@@ -341,14 +455,6 @@ function AstraHud() {
       await applyWindowMode();
     } else {
       await applyOverlayMode();
-    }
-  }
-
-  async function openSettingsWindow() {
-    try {
-      await invoke("open_settings_window");
-    } catch (err: any) {
-      setStatus(err?.message || "Не удалось открыть окно настроек");
     }
   }
 
@@ -392,21 +498,21 @@ function AstraHud() {
     try {
       const res = await getLocalOpenAIStatus();
       if (!res.stored) {
-        setStatus("API-ключ не найден. Откройте настройки и сохраните ключ.");
+        setStatus("Ключ не найден. Открой настройки и сохрани его.");
         return false;
       }
       setApiKeyReady(true);
       return true;
     } catch (err: any) {
-      setStatus(err?.message || "Не удалось проверить ключ. Откройте настройки.");
+      setStatus(err?.message || "Не удалось проверить ключ. Открой настройки.");
       return false;
     }
   }
 
   async function handleSaveProvider() {
     if (!openaiKey) {
-      setStatus(t.onboarding.keyRequired);
-      setSettingsMessage({ text: t.onboarding.keyRequired, tone: "error" });
+      setStatus("Введите ключ");
+      setSettingsMessage({ text: "Введите ключ", tone: "error" });
       return;
     }
     try {
@@ -416,12 +522,12 @@ function AstraHud() {
       if (selectedProject) {
         await applySettingsToProject(selectedProject.id);
         setApiKeyReady(true);
-        setSettingsMessage({ text: "Ключ сохранён локально и активирован", tone: "success" });
+        setSettingsMessage({ text: "Ключ сохранён", tone: "success" });
       } else {
-        setSettingsMessage({ text: "Ключ сохранён локально. Запустите API для активации.", tone: "info" });
+        setSettingsMessage({ text: "Ключ сохранён. Запусти API для активации.", tone: "info" });
       }
       setOpenaiKeyValue("");
-      setStatus("Ключ сохранён локально");
+      setStatus("Ключ сохранён");
     } catch (err: any) {
       setStatus(err.message || t.onboarding.vaultError);
       setSettingsMessage({ text: err.message || t.onboarding.vaultError, tone: "error" });
@@ -430,7 +536,6 @@ function AstraHud() {
     }
   }
 
-
   async function handleRunCommand() {
     if (!selectedProject || !queryText.trim()) return;
     const ok = await ensureApiKey();
@@ -438,28 +543,12 @@ function AstraHud() {
     const newRun = await createRun(selectedProject.id, { query_text: queryText, mode });
     setRun(newRun);
     localStorage.setItem("astra_last_run_id", newRun.id);
-    setEvents([]);
     setPlan([]);
-    setTasks([]);
     setApprovals([]);
-    setArtifacts([]);
-    setMetrics(null);
     await createPlan(newRun.id);
     await refreshSnapshot(newRun.id);
     await startRun(newRun.id);
     openEventStream(newRun.id);
-  }
-
-  async function handleCreatePlan() {
-    if (!run) return;
-    await createPlan(run.id);
-    await refreshSnapshot(run.id);
-  }
-
-  async function handleStartRun() {
-    if (!run) return;
-    await startRun(run.id);
-    openEventStream(run.id);
   }
 
   async function handleCancelRun() {
@@ -468,34 +557,6 @@ function AstraHud() {
     await refreshSnapshot(run.id);
   }
 
-  async function handlePauseToggle() {
-    if (!run) return;
-    if (run.status === "paused") {
-      await resumeRun(run.id);
-    } else {
-      await pauseRun(run.id);
-    }
-    await refreshSnapshot(run.id);
-  }
-
-  async function handleRetryStep(stepId: string) {
-    if (!run) return;
-    await retryStep(run.id, stepId);
-  }
-
-  async function handleExportSnapshot() {
-    if (!run) return;
-    const blob = await downloadSnapshot(run.id);
-    downloadBlob(blob, `снимок_${run.id}.json`);
-  }
-
-  async function handleExportReport() {
-    if (!run) return;
-    const report = artifacts.find((a) => a.type === "report_md");
-    if (!report) return;
-    const blob = await downloadArtifact(report.id);
-    downloadBlob(blob, `отчет_${run.id}.md`);
-  }
 
   async function handleApprove(approvalId: string) {
     await approve(approvalId);
@@ -505,6 +566,15 @@ function AstraHud() {
   async function handleReject(approvalId: string) {
     await reject(approvalId);
     if (run) await refreshSnapshot(run.id);
+  }
+
+  async function refreshSnapshot(runId?: string) {
+    const id = runId || run?.id;
+    if (!id) return;
+    const snapshot = await getSnapshot(id);
+    setRun(snapshot.run);
+    setPlan(snapshot.plan || []);
+    setApprovals(snapshot.approvals || []);
   }
 
   function openEventStream(runId: string) {
@@ -517,7 +587,7 @@ function AstraHud() {
       es.addEventListener(type, (evt) => handleEvent(type, evt as MessageEvent));
     });
     es.onerror = () => {
-      setStatus(t.errors.eventStream);
+      setStatus("Поток событий отключён");
     };
     eventSourceRef.current = es;
   }
@@ -528,105 +598,42 @@ function AstraHud() {
       if (type === "autopilot_state") {
         setAutopilotState(payload);
       }
-      if (type === "autopilot_action") {
-        setRecentActions((prev) => [payload, ...prev].slice(0, 10));
-      }
-      setEvents((prev) => [payload, ...prev].slice(0, 200));
       if (!refreshLock.current) {
         refreshLock.current = true;
         await refreshSnapshot(payload.run_id || run?.id);
         refreshLock.current = false;
       }
       if (type === "run_done" || type === "run_failed" || type === "run_canceled") {
-        setStatus(label(t.events, type, type));
+        setStatus(statusLabel(type.replace("run_", "")));
       }
     } catch (err: any) {
-      setStatus(err.message || t.errors.parseEvent);
+      setStatus(err.message || "Не удалось прочитать событие");
     }
   }
 
-  async function refreshSnapshot(runId?: string) {
-    const id = runId || run?.id;
-    if (!id) return;
-    const snapshot = await getSnapshot(id);
-    setRun(snapshot.run);
-    setPlan(snapshot.plan || []);
-    setTasks(snapshot.tasks || []);
-    setApprovals(snapshot.approvals || []);
-    setArtifacts(snapshot.artifacts || []);
-    setMetrics(snapshot.metrics || null);
-  }
-
   const pendingApprovals = useMemo(() => approvals.filter((a) => a.status === "pending"), [approvals]);
-  const reportArtifact = useMemo(() => artifacts.find((a) => a.type === "report_md"), [artifacts]);
-  const keyStatusLabel = apiKeyReady
-    ? "Ключ активен"
-    : keyStored
-      ? "Ключ сохранён в файле"
-      : "Ключ не сохранён";
-
   const runStatus = run?.status || "idle";
   const isActive = ["running", "paused"].includes(runStatus);
   const isDone = ["done", "failed", "canceled"].includes(runStatus);
   const uiMode = isActive ? "active" : isDone ? "done" : "idle";
-
-  const overlayStatus = autopilotState?.status || runStatus || "idle";
-  const overlayStatusLabel = ({
-    running: "Делает",
-    waiting_confirm: "Ждёт подтверждение",
-    needs_user: "Нужна помощь",
-    done: "Готово",
-    failed: "Ошибка",
-    paused: "Пауза",
-    idle: "Ожидание",
-  } as Record<string, string>)[overlayStatus] || label(t.runStatus, overlayStatus, overlayStatus);
-
-  const phaseLabel = (() => {
-    const phase = autopilotState?.phase;
-    if (phase === "thinking") return "думает";
-    if (phase === "acting") return "делает";
-    if (overlayStatus === "waiting_confirm") return "ждёт подтверждение";
-    if (overlayStatus === "needs_user") return "нужна помощь";
-    return "ожидание";
-  })();
-
-  const isOverlay = windowMode === "overlay";
-  const planLimit = isOverlay ? 5 : 12;
-  const actionsLimit = isOverlay ? 4 : 10;
-  const eventsLimit = isOverlay ? 2 : 6;
-
-  const latestPlan = plan.slice(0, planLimit);
-  const latestActions = (autopilotState?.actions || []).slice(0, actionsLimit);
-  const latestEvents = events.slice(0, eventsLimit);
-
-  const tasksByStep = useMemo(() => {
-    const map = new Map<string, any[]>();
-    tasks.forEach((task) => {
-      const list = map.get(task.plan_step_id) || [];
-      list.push(task);
-      map.set(task.plan_step_id, list);
-    });
-    return map;
-  }, [tasks]);
-
-  const stepStatusLabel = (step: any) => {
-    const status = step.status;
-    if (status === "running") return "делает";
-    if (status === "failed") return "ошибка";
-    if (status === "done") return "готово";
-    return "думает";
-  };
-
   const activeStep = plan.find((step) => step.status === "running") || plan[0];
+  const summary = autopilotState?.step_summary || activeStep?.title || "—";
+  const runStatusLabel = statusLabel(runStatus);
+
+  const keyStatusLabel = apiKeyReady
+    ? "Ключ активен"
+    : keyStored
+      ? "Ключ сохранён"
+      : "Ключ не сохранён";
 
   const settingsPanel = (
-    <aside className={`hud-settings ${isSettingsView || settingsOpen ? "open" : ""} ${isSettingsView ? "settings-window" : ""}`}>
+    <aside className={`hud-settings ${isSettingsView || settingsOpen ? "open" : ""} ${isSettingsView ? "settings-window" : ""}`} onClick={(e) => e.stopPropagation()}>
       <div className="hud-settings-header">
         <div className="hud-settings-title">
-          <div className="hud-section-title">Настройки Astra</div>
-          <div className="hud-meta">Подключения, разрешения и режим работы</div>
+          <div className="hud-section-title">Настройки</div>
+          <div className="hud-meta">Ключи, разрешения и режимы</div>
         </div>
-        <button className="ghost" onClick={closeSettingsWindow}>Закрыть</button>
+        <button className="icon-close" onClick={closeSettingsWindow} title="Закрыть">✕</button>
       </div>
 
       {settingsMessage && (
@@ -641,11 +648,11 @@ function AstraHud() {
           <div className={`status-dot ${apiKeyReady ? "on" : keyStored ? "warm" : "off"}`} />
           <div className="hud-meta">{keyStatusLabel}</div>
           <div className="hud-meta">
-            API: {apiAvailable === null ? "проверка…" : apiAvailable ? "подключен" : "не отвечает"}
+            API: {apiAvailable === null ? "проверка…" : apiAvailable ? "подключён" : "не отвечает"}
           </div>
         </div>
         {apiAvailable === false && (
-          <div className="hud-meta">Запустите локальный API, чтобы активировать ключ.</div>
+          <div className="hud-meta">Запусти API, чтобы активировать ключ.</div>
         )}
         <label className="hud-field">
           <span>Модель</span>
@@ -657,7 +664,7 @@ function AstraHud() {
           />
         </label>
         <label className="hud-field">
-          <span>API ключ</span>
+          <span>Ключ</span>
           <input
             type="password"
             placeholder={t.onboarding.openaiKeyPlaceholder}
@@ -667,7 +674,7 @@ function AstraHud() {
         </label>
         <div className="settings-actions">
           <button className="primary" disabled={savingVault || !openaiKey.trim()} onClick={handleSaveProvider}>
-            {savingVault ? t.onboarding.saving : "Сохранить локально"}
+            {savingVault ? t.onboarding.saving : "Сохранить"}
           </button>
         </div>
         <div className="hud-meta">Файл ключа: config/local.secrets.json</div>
@@ -695,13 +702,13 @@ function AstraHud() {
       </section>
 
       <button className="settings-advanced-toggle" onClick={() => setAdvancedOpen((prev) => !prev)}>
-        {advancedOpen ? "Скрыть расширенные настройки" : "Расширенные настройки"}
+        {advancedOpen ? "Скрыть расширенные" : "Расширенные настройки"}
       </button>
 
       {advancedOpen && (
         <div className="settings-advanced">
           <section className="settings-card">
-            <div className="settings-card-title">Режим работы</div>
+            <div className="settings-card-title">Режим</div>
             <select value={mode} onChange={(e) => setMode(e.target.value)}>
               {MODE_OPTIONS.map((m) => (
                 <option key={m.value} value={m.value}>{m.label}</option>
@@ -742,7 +749,7 @@ function AstraHud() {
 
   if (isSettingsView) {
     return (
-      <div className="app settings-only">
+      <div className="app settings-only" onClick={closeSettingsWindow}>
         <div className="settings-shell">{settingsPanel}</div>
       </div>
     );
@@ -752,160 +759,49 @@ function AstraHud() {
     <div className={`app hud-app mode-${uiMode} mode-${windowMode} ${settingsOpen ? "settings-open" : ""}`}>
       <div className="hud-shell">
         <div className="hud-top-zone" />
-        <header className="hud-header">
-          <div className="hud-actions">
-            <button className="icon-button" title="Настройки" onClick={openSettingsWindow}>
-              ⚙︎
-            </button>
-            <button className="icon-button" title="Переключить режим" onClick={toggleOverlayMode}>
-              ⤢
-            </button>
-            {isActive && (
-              <button className="icon-button danger" title="Стоп" onClick={handleCancelRun}>
-                ■
-              </button>
-            )}
-          </div>
-        </header>
+        <HeaderOverlay
+          onHide={() => appWindow.hide()}
+          onMinimize={() => appWindow.minimize()}
+          onStop={handleCancelRun}
+          showStop={isActive}
+        />
 
         <div className="hud-content">
           {uiMode === "idle" && (
-            <section className="hud-idle">
-              <div className="hud-idle-header">
-                <div className="hud-logo">A</div>
-              </div>
-              <div className="hud-greeting">Что нужно сделать?</div>
-              <div className="hud-input-row">
-                <input
-                  className="hud-input"
-                  type="text"
-                  placeholder={t.hud.placeholder}
-                  value={queryText}
-                  onChange={(e) => setQueryText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      handleRunCommand();
-                    }
-                  }}
-                />
-                <button
-                  className="send-button"
-                  title="Запустить"
-                  onClick={handleRunCommand}
-                  disabled={!selectedProject || !queryText.trim() || isActive}
-                >
-                  ➤
-                </button>
-              </div>
-              {status && <div className="hud-message">{status}</div>}
-            </section>
+            <PromptInput
+              value={queryText}
+              disabled={!selectedProject || !queryText.trim() || isActive}
+              onChange={setQueryText}
+              onSubmit={handleRunCommand}
+              status={status}
+            />
           )}
 
           {uiMode !== "idle" && (
             <section className="hud-exec">
-              <div className="hud-brand">ASTRA</div>
-              <div className="hud-section">
-                <div className="hud-section-title">Сейчас</div>
-                <div className="hud-value">{autopilotState?.step_summary || activeStep?.title || "—"}</div>
-                <div className="hud-meta">Статус: {phaseLabel}</div>
-                <div className="hud-meta">Размышление: {autopilotState?.reason || "—"}</div>
-                <div className="hud-meta">Цель: {autopilotState?.goal || run?.query_text || "—"}</div>
-              </div>
-
-              <div className="hud-section">
-                <div className="hud-section-title">Задачи</div>
-                <ul className="hud-list scrollable">
-                  {latestPlan.map((step) => (
-                    <li key={step.id}>
-                      <div className="hud-list-title">{step.step_index + 1}. {step.title}</div>
-                      <div className={`hud-list-sub status-${step.status}`}>{stepStatusLabel(step)}</div>
-                      {!isOverlay && tasksByStep.get(step.id)?.length ? (
-                        <ul className="hud-sublist">
-                          {tasksByStep.get(step.id)!.slice(0, 3).map((task) => (
-                            <li key={task.id}>
-                              <div className="hud-list-sub">{label(t.taskStatus, task.status, task.status)}</div>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
-                      {step.status === "failed" && (
-                        <div className="hud-row">
-                          <button onClick={() => handleRetryStep(step.id)}>{t.workspace.retryStep}</button>
-                        </div>
-                      )}
-                    </li>
-                  ))}
-                  {!latestPlan.length && <li className="muted">{t.empty.plan}</li>}
-                </ul>
-              </div>
-
-              <div className="hud-section">
-                <div className="hud-section-title">Действия</div>
-                <div className="hud-actions-row">
-                  {latestActions.map((action: any, idx: number) => (
-                    <span key={`action-${idx}`} className="hud-chip">{action.type}</span>
-                  ))}
-                  {!latestActions.length && <span className="hud-chip muted">—</span>}
-                </div>
-              </div>
-
-              {!isOverlay && (
-                <div className="hud-section">
-                  <div className="hud-section-title">Журнал</div>
-                  <ul className="hud-list scrollable">
-                    {latestEvents.map((evt) => (
-                      <li key={`${evt.id}-${evt.seq}`}>
-                        <div className="hud-list-title">{label(t.events, evt.type, evt.type)}</div>
-                        <div className="hud-list-sub">{evt.message}</div>
-                      </li>
-                    ))}
-                    {!latestEvents.length && <li className="muted">{t.empty.events}</li>}
-                  </ul>
-                </div>
-              )}
-
-              {pendingApprovals[0] && (
-                <div className="hud-section hud-approval">
-                  <div className="hud-section-title">Подтверждение</div>
-                  <div className="hud-value">{pendingApprovals[0].title}</div>
-                  {pendingApprovals[0].description && <div className="hud-meta">{pendingApprovals[0].description}</div>}
-                  <div className="hud-row">
-                    <button className="primary" onClick={() => handleApprove(pendingApprovals[0].id)}>{t.workspace.approve}</button>
-                    <button className="danger" onClick={() => handleReject(pendingApprovals[0].id)}>{t.workspace.reject}</button>
-                  </div>
-                </div>
-              )}
-
-              {isDone && (
-                <div className="hud-section">
-                  <div className="hud-section-title">Итог</div>
-                  <div className="hud-value">{overlayStatusLabel}</div>
-                </div>
-              )}
+              <StatusLine
+                title={summary}
+                subtitle={run?.query_text || ""}
+                status={runStatusLabel}
+              />
+              <TaskList steps={plan} />
+              <ConfirmCard
+                approval={pendingApprovals[0]}
+                onApprove={() => handleApprove(pendingApprovals[0].id)}
+                onReject={() => handleReject(pendingApprovals[0].id)}
+              />
+              {isDone ? <ResultCard status={runStatusLabel} /> : null}
+              {status && !isDone ? <div className="hud-status-line">{status}</div> : null}
             </section>
           )}
-
-          {uiMode !== "idle" && !isOverlay && (
-            <footer className="hud-footer">
-              <span className="hud-pill">{t.labels.coverage} {formatCoverage(metrics)}</span>
-              <span className="hud-pill">{t.labels.conflicts} {metrics?.conflicts ?? 0}</span>
-              <span className="hud-pill">{t.labels.freshness} {formatFreshness(metrics)}</span>
-              <span className="hud-pill">{t.labels.approvals} {pendingApprovals.length}</span>
-              <button className="ghost" onClick={handleExportSnapshot} disabled={!run}>{t.workspace.exportJson}</button>
-              <button className="ghost" onClick={handleExportReport} disabled={!reportArtifact}>{t.workspace.exportMd}</button>
-            </footer>
-          )}
-
-          {status && uiMode !== "idle" && <div className="hud-toast">{status}</div>}
         </div>
       </div>
 
-      {settingsOpen ? settingsPanel : null}
+      {settingsOpen ? (
+        <div className="modal-backdrop" onClick={closeSettingsWindow}>
+          {settingsPanel}
+        </div>
+      ) : null}
     </div>
   );
-}
-
-export default function App() {
-  return <AstraHud />;
 }

@@ -196,7 +196,7 @@ body {
 
 .hud-shell:hover .hud-top-zone,
 .hud-shell:focus-within .hud-top-zone {
-  pointer-events: none;
+  pointer-events: auto;
 }
 
 .hud-content {
@@ -513,6 +513,7 @@ button.ghost {
   padding: 18px;
   display: grid;
   gap: 14px;
+  overflow: auto;
   opacity: 0;
   transform: translateY(8px) scale(0.98);
   pointer-events: none;
@@ -768,4 +769,206 @@ select {
     transition-duration: 0.001ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* --- UX Refresh Overrides --- */
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+#root,
+.app,
+.hud-app {
+  overflow: hidden;
+}
+
+.hud-app {
+  padding: 0;
+}
+
+.hud-shell {
+  width: min(60vw, 600px);
+  max-width: 600px;
+  padding: 28px 18px 16px;
+  border-radius: 12px;
+  gap: 10px;
+}
+
+.mode-overlay .hud-shell {
+  width: min(60vw, 460px);
+  max-width: 460px;
+  padding: 22px 14px 14px;
+  border-radius: 12px;
+}
+
+.mode-window .hud-shell {
+  border-radius: 10px;
+  padding: 18px 16px 16px;
+}
+
+.hud-top-zone {
+  height: 22px;
+}
+
+.hud-content {
+  overflow: hidden;
+}
+
+.hud-idle {
+  align-items: center;
+  align-content: center;
+  text-align: center;
+  gap: 12px;
+  padding: 8px 4px 6px;
+}
+
+.hud-idle-title {
+  font-size: 30px;
+  letter-spacing: 0.38em;
+  text-indent: 0.38em;
+  font-weight: 600;
+  color: var(--hud-text);
+}
+
+.hud-idle-subtitle {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.hud-input-row {
+  grid-template-columns: 1fr 36px;
+  width: 100%;
+}
+
+.hud-input {
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  font-size: 14px;
+}
+
+.send-button {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 16px;
+}
+
+.hud-status {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0;
+}
+
+.hud-status-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.hud-status-subtitle {
+  font-size: 12px;
+  color: var(--hud-muted);
+}
+
+.hud-status-chip {
+  display: inline-flex;
+  align-self: start;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  font-size: 11px;
+  color: var(--hud-accent);
+}
+
+.hud-status-line {
+  font-size: 12px;
+  color: var(--hud-muted);
+  text-align: center;
+  margin-top: 4px;
+}
+
+.hud-list.scrollable {
+  max-height: 220px;
+}
+
+.mode-overlay .hud-list.scrollable {
+  max-height: 140px;
+}
+
+.overlay-topbar {
+  position: absolute;
+  top: 6px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  justify-content: flex-end;
+  opacity: 0;
+  transform: translateY(-6px);
+  pointer-events: none;
+  transition: opacity 180ms ease, transform 180ms ease;
+  z-index: 6;
+  -webkit-app-region: drag;
+}
+
+.overlay-topbar-inner {
+  display: flex;
+  gap: 8px;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.overlay-btn {
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--hud-text);
+  cursor: pointer;
+}
+
+.overlay-btn.danger {
+  border-color: rgba(255, 93, 93, 0.5);
+  color: #ffb3b3;
+}
+
+.overlay-btn.muted {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 10, 12, 0.6);
+  display: grid;
+  place-items: center;
+  z-index: 10;
+}
+
+.icon-close {
+  border: none;
+  background: transparent;
+  color: var(--hud-text);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.hud-settings {
+  max-width: 680px;
+  width: min(90vw, 680px);
+}
+
+.settings-card {
+  background: rgba(20, 20, 22, 0.85);
+}
+
+/* show topbar only when hovering top edge */
+.hud-top-zone:hover + .overlay-topbar,
+.overlay-topbar:hover {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
 }

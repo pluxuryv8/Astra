@@ -46,6 +46,10 @@ fn main() {
             let _ = shortcut_manager.register("Cmd+Shift+O", move || {
                 let _ = handle_toggle.emit_all("toggle_hud_mode", {});
             });
+            let handle_hide = app.handle();
+            let _ = shortcut_manager.register("Cmd+W", move || {
+                let _ = handle_hide.emit_all("overlay_hide_hotkey", {});
+            });
             Ok(())
         })
         .run(tauri::generate_context!())
