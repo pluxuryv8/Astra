@@ -1000,3 +1000,21 @@ randarc-astra
 - Ядро: `core/`, `memory/`, `apps/api/`, `skills/`, `schemas/`, `apps/desktop/src`, `apps/desktop/src-tauri`.
 - Мусор/генерёнка: `node_modules/`, `dist/`, `__pycache__/`, `.astra/`, `artifacts/`, `logs/`, `apps/desktop/src-tauri/target/`.
 - Доноры/справочное: `third_party/_donors/`.
+
+**Изменения в этом прогоне (fix/blockers)**
+- Обновлён `core/event_bus.py`: список типов берётся из `schemas/events/*.schema.json`, добавлены `autopilot_state`, `autopilot_action`, `run_paused`, `run_resumed`.
+- Синхронизирован `schemas/event.schema.json`: enum берётся из файлов событий, payload допускает `null`.
+- Приведён `skills/computer/skill.py` к контракту `steps` (schema не менялась).
+- Обновлён `.gitignore` для явного игнора `**/__pycache__/`, `**/*.pyc`, `**/.pytest_cache/`.
+- Добавлены тесты: `tests/test_event_types_sync.py`, `tests/test_autopilot_events.py`, `tests/test_computer_skill_schema.py`.
+
+Как проверить:
+1. `pytest -q`
+2. Ручной запуск UI:
+   - `./scripts/run.sh`
+   - В HUD запусти задачу (режим `execute_confirm`).
+   - В журнале событий должны появляться `autopilot_state` и `autopilot_action` (если автопилот сделал хотя бы одно действие).
+3. Проверка pause/resume:
+   - Через UI нажми паузу/возобновление или вызови API `POST /api/v1/runs/{id}/pause` и `POST /api/v1/runs/{id}/resume`.
+   - Убедись, что API отвечает 200 и в событиях есть `run_paused`/`run_resumed`.
+
