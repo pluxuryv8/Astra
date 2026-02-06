@@ -1,18 +1,20 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 from memory import store
 
 
-# EN kept: типы событий — публичный контракт API/клиента
-ALLOWED_EVENT_TYPES = {
+_DEFAULT_EVENT_TYPES = {
     "run_created",
     "plan_created",
     "run_started",
     "run_done",
     "run_failed",
     "run_canceled",
+    "run_paused",
+    "run_resumed",
     "task_queued",
     "task_started",
     "task_progress",
@@ -28,7 +30,29 @@ ALLOWED_EVENT_TYPES = {
     "approval_requested",
     "approval_approved",
     "approval_rejected",
+    "autopilot_state",
+    "autopilot_action",
 }
+
+
+def _load_event_types_from_schemas() -> set[str]:
+    events_dir = Path(__file__).resolve().parents[1] / "schemas" / "events"
+    if not events_dir.exists():
+        return set()
+    types: set[str] = set()
+    for path in events_dir.glob("*.schema.json"):
+        name = path.name
+        if name.endswith(".schema.json"):
+            types.add(name[: -len(".schema.json")])
+    return types
+
+
+# EN kept: типы событий — публичный контракт API/клиента
+ALLOWED_EVENT_TYPES = _load_event_types_from_schemas() or _DEFAULT_EVENT_TYPES
+
+
+def get_allowed_event_types() -> set[str]:
+    return set(ALLOWED_EVENT_TYPES)
 
 
 def emit(run_id: str, event_type: str, message: str, payload: dict | None = None, level: str = "info", task_id: Optional[str] = None, step_id: Optional[str] = None) -> dict:
