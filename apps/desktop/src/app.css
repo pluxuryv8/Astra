@@ -161,7 +161,7 @@ body {
   left: 20px;
   right: 20px;
   z-index: 4;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
   opacity: 0;
   pointer-events: none;
   transform: translateY(-8px);
@@ -909,7 +909,7 @@ html, body {
   pointer-events: none;
   transition: opacity 180ms ease, transform 180ms ease;
   z-index: 6;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 
 .overlay-topbar-inner {
@@ -927,6 +927,7 @@ html, body {
   background: rgba(255, 255, 255, 0.08);
   color: var(--hud-text);
   cursor: pointer;
+  -webkit-app-region: no-drag;
 }
 
 .overlay-btn.close {
