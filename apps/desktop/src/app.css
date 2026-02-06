@@ -929,6 +929,18 @@ html, body {
   cursor: pointer;
 }
 
+.overlay-btn.close {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .overlay-btn.danger {
   border-color: rgba(255, 93, 93, 0.5);
   color: #ffb3b3;
@@ -937,6 +949,12 @@ html, body {
 .overlay-btn.muted {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.mode-window .overlay-topbar {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 .modal-backdrop {

@@ -82,19 +82,22 @@ function statusLabel(status?: string | null) {
 }
 
 function HeaderOverlay({
+  onClose,
   onHide,
   onMinimize,
   onStop,
   showStop
 }: {
+  onClose: () => void;
   onHide: () => void;
   onMinimize: () => void;
   onStop: () => void;
   showStop: boolean;
 }) {
   return (
-    <div className="overlay-topbar" aria-hidden="true">
+    <div className="overlay-topbar">
       <div className="overlay-topbar-inner">
+        <button className="overlay-btn close" onClick={onClose} title="Закрыть">✕</button>
         <button className="overlay-btn" onClick={onHide} title="Скрыть">Скрыть</button>
         <button className="overlay-btn" onClick={onMinimize} title="Свернуть">Свернуть</button>
         <button className={`overlay-btn ${showStop ? "danger" : "muted"}`} onClick={onStop} disabled={!showStop} title="Стоп">
@@ -258,6 +261,8 @@ export default function App() {
       if (event.key === "Escape") {
         if (settingsOpen || isSettingsView) {
           closeSettingsWindow();
+        } else {
+          appWindow.hide();
         }
       }
       if (event.metaKey && event.key === ",") {
@@ -760,6 +765,7 @@ export default function App() {
       <div className="hud-shell">
         <div className="hud-top-zone" />
         <HeaderOverlay
+          onClose={() => appWindow.hide()}
           onHide={() => appWindow.hide()}
           onMinimize={() => appWindow.minimize()}
           onStop={handleCancelRun}
