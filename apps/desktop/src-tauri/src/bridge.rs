@@ -204,6 +204,46 @@ fn handle_autopilot_capture(_body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     Response::from_string("НЕДОСТУПНО").with_status_code(503)
 }
 
+#[cfg(target_os = "macos")]
+fn handle_autopilot_act(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
+    let parsed: Result<AutopilotActRequest, _> = serde_json::from_str(body);
+    match parsed {
+        Ok(req) => {
+            #[cfg(feature = "desktop-skills")]
+            {
+                // On macOS some keyboard-layout APIs used by Enigo require the main *dispatch queue*.
+                // Calling them from this background HTTP thread can crash the process (dispatch_assert_queue).
+                let action = req.action;
+                let image_width = req.image_width;
+                let image_height = req.image_height;
+
+                let result = crate::macos_main_queue::sync(move || -> Result<String, String> {
+                    let executor = AutopilotExecutor::new()?;
+                    executor.execute(&action, image_width, image_height)
+                });
+
+                return match result {
+                    Ok(Ok(summary)) => {
+                        Response::from_string(format!("{{\"status\":\"ok\",\"summary\":\"{}\"}}", summary)).with_status_code(200)
+                    }
+                    Ok(Err(err)) => Response::from_string(err).with_status_code(500),
+                    Err(_) => {
+                        eprintln!("autopilot/act: panic while executing action on main queue");
+                        Response::from_string("внутренняя ошибка autopilot").with_status_code(500)
+                    }
+                };
+            }
+            #[cfg(not(feature = "desktop-skills"))]
+            {
+                let _ = req;
+                return Response::from_string("НЕДОСТУПНО").with_status_code(503);
+            }
+        }
+        Err(_) => Response::from_string("некорректный запрос").with_status_code(400),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
 fn handle_autopilot_act(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let parsed: Result<AutopilotActRequest, _> = serde_json::from_str(body);
     match parsed {

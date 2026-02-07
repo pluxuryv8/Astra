@@ -5,6 +5,7 @@ mod bridge;
 mod autopilot;
 #[cfg(feature = "desktop-skills")]
 mod skills;
+mod macos_main_queue;
 
 use tauri::{GlobalShortcutManager, Manager, WindowBuilder, WindowUrl};
 
