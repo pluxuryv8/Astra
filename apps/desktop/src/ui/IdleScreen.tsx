@@ -9,7 +9,7 @@ type IdleScreenProps = {
 export default function IdleScreen({ value, disabled, onChange, onSubmit, status }: IdleScreenProps) {
   return (
     <section className="idle">
-      <div className="idle-brand">Astra</div>
+      <div className="idle-brand">ASTRA</div>
       <div className="idle-tagline">Чем займёмся?</div>
       <div className="idle-input-wrap">
         <input
