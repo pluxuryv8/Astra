@@ -1,10 +1,22 @@
 // EN kept: публичные пути API и заголовки HTTP — контракт интеграции
 import { invoke } from "@tauri-apps/api/tauri";
+import type {
+  Approval,
+  MemorySearchResult,
+  PlanStep,
+  Project,
+  ProjectSettings,
+  Run,
+  Snapshot,
+  StatusResponse
+} from "./types";
 
 const DEFAULT_PORT = import.meta.env.VITE_API_PORT || "8055";
 const API_BASE = import.meta.env.VITE_API_BASE || `http://127.0.0.1:${DEFAULT_PORT}/api/v1`;
 const SESSION_KEY = "astra_session_token";
 let sessionToken: string | null = null;
+
+type OpenAIStoreResponse = StatusResponse & { stored?: boolean };
 
 export async function checkPermissions(): Promise<{ screen_recording: boolean; accessibility: boolean; message: string }> {
   return (await invoke("check_permissions")) as { screen_recording: boolean; accessibility: boolean; message: string };
@@ -19,7 +31,9 @@ function getOrCreateSessionToken(): string {
   }
   const bytes = new Uint8Array(32);
   crypto.getRandomValues(bytes);
-  const token = Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+  const token = Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
   localStorage.setItem(SESSION_KEY, token);
   sessionToken = token;
   return token;
@@ -49,10 +63,12 @@ export async function checkApiStatus(): Promise<boolean> {
 }
 
 function authHeaders() {
-  return sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {};
+  return (sessionToken ? { Authorization: `Bearer ${sessionToken}` } : {}) as Record<string, string>;
 }
 
-async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
+type ApiOptions = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
+
+async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
       "Content-Type": "application/json",
@@ -71,9 +87,7 @@ async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
 
 async function apiBlob(path: string): Promise<Blob> {
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: {
-      ...authHeaders()
-    }
+    headers: authHeaders()
   });
   if (!res.ok) {
     const text = await res.text();
@@ -82,75 +96,81 @@ async function apiBlob(path: string): Promise<Blob> {
   return await res.blob();
 }
 
-export function listProjects() {
-  return api<any[]>("/projects");
+export function listProjects(): Promise<Project[]> {
+  return api<Project[]>("/projects");
 }
 
-export function updateProject(projectId: string, payload: { name?: string | null; tags?: string[] | null; settings?: Record<string, any> | null }) {
-  return api<any>(`/projects/${projectId}`, { method: "PUT", body: JSON.stringify(payload) });
+export function updateProject(
+  projectId: string,
+  payload: { name?: string | null; tags?: string[] | null; settings?: ProjectSettings | null }
+): Promise<Project> {
+  return api<Project>(`/projects/${projectId}`, { method: "PUT", body: JSON.stringify(payload) });
 }
 
-export function createProject(payload: { name: string; tags: string[]; settings: Record<string, any> }) {
-  return api<any>("/projects", { method: "POST", body: JSON.stringify(payload) });
+export function createProject(payload: { name: string; tags: string[]; settings: ProjectSettings }): Promise<Project> {
+  return api<Project>("/projects", { method: "POST", body: JSON.stringify(payload) });
 }
 
-export function createRun(projectId: string, payload: { query_text: string; mode: string; parent_run_id?: string | null; purpose?: string | null }) {
-  return api<any>(`/projects/${projectId}/runs`, { method: "POST", body: JSON.stringify(payload) });
+export function createRun(
+  projectId: string,
+  payload: { query_text: string; mode: string; parent_run_id?: string | null; purpose?: string | null }
+): Promise<Run> {
+  return api<Run>(`/projects/${projectId}/runs`, { method: "POST", body: JSON.stringify(payload) });
 }
 
-export function createPlan(runId: string) {
-  return api<any[]>(`/runs/${runId}/plan`, { method: "POST" });
+export function createPlan(runId: string): Promise<PlanStep[]> {
+  return api<PlanStep[]>(`/runs/${runId}/plan`, { method: "POST" });
 }
 
-export function startRun(runId: string) {
-  return api<any>(`/runs/${runId}/start`, { method: "POST" });
+export function startRun(runId: string): Promise<StatusResponse> {
+  return api<StatusResponse>(`/runs/${runId}/start`, { method: "POST" });
 }
 
-export function cancelRun(runId: string) {
-  return api<any>(`/runs/${runId}/cancel`, { method: "POST" });
+export function cancelRun(runId: string): Promise<StatusResponse> {
+  return api<StatusResponse>(`/runs/${runId}/cancel`, { method: "POST" });
 }
 
-export function pauseRun(runId: string) {
-  return api<any>(`/runs/${runId}/pause`, { method: "POST" });
+export function pauseRun(runId: string): Promise<StatusResponse> {
+  return api<StatusResponse>(`/runs/${runId}/pause`, { method: "POST" });
 }
 
-export function resumeRun(runId: string) {
-  return api<any>(`/runs/${runId}/resume`, { method: "POST" });
+export function resumeRun(runId: string): Promise<StatusResponse> {
+  return api<StatusResponse>(`/runs/${runId}/resume`, { method: "POST" });
 }
 
-export function getSnapshot(runId: string) {
-  return api<any>(`/runs/${runId}/snapshot`);
+export function getSnapshot(runId: string): Promise<Snapshot> {
+  return api<Snapshot>(`/runs/${runId}/snapshot`);
 }
 
-export function searchMemory(projectId: string, q: string) {
-  return api<any[]>(`/projects/${projectId}/memory/search?q=${encodeURIComponent(q)}`);
+export function searchMemory(projectId: string, q: string): Promise<MemorySearchResult[]> {
+  return api<MemorySearchResult[]>(`/projects/${projectId}/memory/search?q=${encodeURIComponent(q)}`);
 }
 
-export function listApprovals(runId: string) {
-  return api<any[]>(`/runs/${runId}/approvals`);
+export function listApprovals(runId: string): Promise<Approval[]> {
+  return api<Approval[]>(`/runs/${runId}/approvals`);
 }
 
-export function approve(approvalId: string, decision?: { limit?: number; action?: string }) {
-  return api<any>(`/approvals/${approvalId}/approve`, {
+export function approve(approvalId: string, decision?: { limit?: number; action?: string }): Promise<Approval> {
+  return api<Approval>(`/approvals/${approvalId}/approve`, {
     method: "POST",
     body: JSON.stringify({ decision: decision || null })
   });
 }
 
-export function reject(approvalId: string) {
-  return api<any>(`/approvals/${approvalId}/reject`, { method: "POST" });
+export function reject(approvalId: string): Promise<Approval> {
+  return api<Approval>(`/approvals/${approvalId}/reject`, { method: "POST" });
 }
 
-export function resolveConflict(runId: string, conflictId: string) {
-  return api<any>(`/runs/${runId}/conflicts/${conflictId}/resolve`, { method: "POST" });
+export function resolveConflict(runId: string, conflictId: string): Promise<Run> {
+  return api<Run>(`/runs/${runId}/conflicts/${conflictId}/resolve`, { method: "POST" });
 }
 
-export function retryTask(runId: string, taskId: string) {
-  return api<any>(`/runs/${runId}/tasks/${taskId}/retry`, { method: "POST" });
+export function retryTask(runId: string, taskId: string): Promise<StatusResponse> {
+  return api<StatusResponse>(`/runs/${runId}/tasks/${taskId}/retry`, { method: "POST" });
 }
 
-export function retryStep(runId: string, stepId: string) {
-  return api<any>(`/runs/${runId}/steps/${stepId}/retry`, { method: "POST" });
+export function retryStep(runId: string, stepId: string): Promise<StatusResponse> {
+  return api<StatusResponse>(`/runs/${runId}/steps/${stepId}/retry`, { method: "POST" });
 }
 
 export async function downloadArtifact(artifactId: string): Promise<Blob> {
@@ -161,15 +181,15 @@ export async function downloadSnapshot(runId: string): Promise<Blob> {
   return apiBlob(`/runs/${runId}/snapshot/download`);
 }
 
-export function storeOpenAIKey(apiKey: string) {
-  return api<any>("/secrets/openai", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
+export function storeOpenAIKey(apiKey: string): Promise<OpenAIStoreResponse> {
+  return api<OpenAIStoreResponse>("/secrets/openai", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
 }
 
-export function storeOpenAIKeyLocal(apiKey: string) {
-  return api<any>("/secrets/openai_local", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
+export function storeOpenAIKeyLocal(apiKey: string): Promise<OpenAIStoreResponse> {
+  return api<OpenAIStoreResponse>("/secrets/openai_local", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
 }
 
-export function getLocalOpenAIStatus() {
+export function getLocalOpenAIStatus(): Promise<{ stored: boolean }> {
   return api<{ stored: boolean }>("/secrets/openai_local");
 }
 
