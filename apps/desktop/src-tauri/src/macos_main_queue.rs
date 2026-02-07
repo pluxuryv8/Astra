@@ -10,7 +10,6 @@ mod imp {
 
     type DispatchQueue = *mut c_void;
 
-    #[link(name = "dispatch")]
     extern "C" {
         fn dispatch_get_main_queue() -> DispatchQueue;
         fn dispatch_sync_f(queue: DispatchQueue, context: *mut c_void, work: extern "C" fn(*mut c_void));
@@ -83,4 +82,3 @@ mod imp {
 }
 
 pub use imp::sync;
-
