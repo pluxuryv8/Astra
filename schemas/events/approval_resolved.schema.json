@@ -7,6 +7,12 @@
     "approval_id": {
       "type": "string"
     },
+    "approval_type": {
+      "type": ["string", "null"]
+    },
+    "step_id": {
+      "type": ["string", "null"]
+    },
     "status": {
       "type": "string",
       "enum": ["approved", "rejected", "expired"]
@@ -15,6 +21,6 @@
       "type": ["object", "null"]
     }
   },
-  "required": ["approval_id", "status"],
+  "required": ["approval_id", "status", "approval_type", "step_id"],
   "additionalProperties": false
 }

@@ -15,6 +15,12 @@ from core.event_bus import emit
 from core.executor.success_criteria import evaluate_success_checks, normalize_success_checks
 from core.llm_routing import ContextItem
 from core.ocr import OCRCache, OCRResult, get_default_provider
+from core.safety.approvals import (
+    approval_type_from_flags,
+    build_preview_for_step,
+    preview_summary,
+    proposed_actions_from_preview,
+)
 from memory import store
 
 
@@ -170,6 +176,7 @@ class ComputerExecutor:
         step_id = step["id"]
         task_id = task["id"]
         success_checks = normalize_success_checks(step.get("success_checks"), step.get("success_criteria"))
+        danger_flags = step.get("danger_flags") or []
 
         emit(
             run_id,
@@ -180,7 +187,11 @@ class ComputerExecutor:
             step_id=step_id,
         )
 
-        if step.get("requires_approval") or step.get("danger_flags"):
+        if "password" in danger_flags:
+            result = self._handle_password_entry(run, step, task)
+            return result
+
+        if step.get("requires_approval") or danger_flags:
             approved = self._request_step_approval(run, step, task)
             if not approved:
                 emit(
@@ -706,29 +717,40 @@ class ComputerExecutor:
         run_id = run["id"]
         task_id = task["id"]
         step_id = step["id"]
-        preview = {
-            "title": step.get("title"),
-            "kind": step.get("kind"),
-            "danger_flags": step.get("danger_flags") or [],
-        }
-        approval = store.create_approval(
-            run_id=run_id,
-            task_id=task_id,
-            scope="computer_step",
-            title="Подтверждение действия",
-            description="Требуется подтверждение для выполнения шага на компьютере.",
-            proposed_actions=[preview],
-        )
+        existing = None
+        for approval_item in store.list_approvals(run_id):
+            if approval_item.get("step_id") == step_id and approval_item.get("status") == "pending":
+                existing = approval_item
+                break
+
+        approval_type = approval_type_from_flags(step.get("danger_flags") or [])
+        preview = build_preview_for_step(run, step, approval_type)
+        if existing is None:
+            approval = store.create_approval(
+                run_id=run_id,
+                task_id=task_id,
+                step_id=step_id,
+                scope="dangerous_step",
+                approval_type=approval_type,
+                title=preview.get("summary") or "Подтверждение действия",
+                description=preview.get("risk") or "Требуется подтверждение",
+                proposed_actions=proposed_actions_from_preview(approval_type, preview),
+                preview=preview,
+            )
+        else:
+            approval = existing
         emit(
             run_id,
             "approval_requested",
             "Запрошено подтверждение",
             {
                 "approval_id": approval["id"],
-                "scope": approval["scope"],
-                "title": approval["title"],
-                "description": approval["description"],
-                "proposed_actions": approval["proposed_actions"],
+                "approval_type": approval.get("approval_type"),
+                "step_id": step_id,
+                "preview_summary": preview_summary(preview),
+                "scope": approval.get("scope"),
+                "title": approval.get("title"),
+                "description": approval.get("description"),
             },
             task_id=task_id,
             step_id=step_id,
@@ -752,6 +774,8 @@ class ComputerExecutor:
                 "approval_id": approval["id"],
                 "status": approval["status"],
                 "decision": approval.get("decision"),
+                "approval_type": approval.get("approval_type"),
+                "step_id": step_id,
             },
             task_id=task_id,
             step_id=step_id,
@@ -762,6 +786,14 @@ class ComputerExecutor:
                 "approval_rejected",
                 "Подтверждение отклонено",
                 {"approval_id": approval["id"]},
+                task_id=task_id,
+                step_id=step_id,
+            )
+            emit(
+                run_id,
+                "step_cancelled_by_user",
+                "Шаг отменён пользователем",
+                {"step_id": step_id, "approval_id": approval["id"]},
                 task_id=task_id,
                 step_id=step_id,
             )
@@ -782,18 +814,19 @@ class ComputerExecutor:
         run_id = run["id"]
         task_id = task["id"]
         step_id = step["id"]
-        preview = {
-            "title": step.get("title"),
-            "kind": step.get("kind"),
-            "reason": reason,
-        }
+        approval_type = approval_type_from_flags(step.get("danger_flags") or [])
+        preview = build_preview_for_step(run, step, approval_type)
+        preview["details"] = {**(preview.get("details") or {}), "reason": reason}
         approval = store.create_approval(
             run_id=run_id,
             task_id=task_id,
+            step_id=step_id,
             scope="executor_help",
-            title="Нужно вмешательство",
-            description="Executor не может продолжить без подтверждения пользователя.",
-            proposed_actions=[preview],
+            approval_type=approval_type,
+            title=preview.get("summary") or "Нужно вмешательство",
+            description=preview.get("risk") or "Executor не может продолжить без подтверждения пользователя.",
+            proposed_actions=proposed_actions_from_preview(approval_type, preview),
+            preview=preview,
         )
         emit(
             run_id,
@@ -801,10 +834,12 @@ class ComputerExecutor:
             "Запрошено подтверждение",
             {
                 "approval_id": approval["id"],
-                "scope": approval["scope"],
-                "title": approval["title"],
-                "description": approval["description"],
-                "proposed_actions": approval["proposed_actions"],
+                "approval_type": approval.get("approval_type"),
+                "step_id": step_id,
+                "preview_summary": preview_summary(preview),
+                "scope": approval.get("scope"),
+                "title": approval.get("title"),
+                "description": approval.get("description"),
             },
             task_id=task_id,
             step_id=step_id,
@@ -828,6 +863,8 @@ class ComputerExecutor:
                 "approval_id": approval["id"],
                 "status": approval["status"],
                 "decision": approval.get("decision"),
+                "approval_type": approval.get("approval_type"),
+                "step_id": step_id,
             },
             task_id=task_id,
             step_id=step_id,
@@ -838,6 +875,14 @@ class ComputerExecutor:
                 "approval_rejected",
                 "Подтверждение отклонено",
                 {"approval_id": approval["id"]},
+                task_id=task_id,
+                step_id=step_id,
+            )
+            emit(
+                run_id,
+                "step_cancelled_by_user",
+                "Шаг отменён пользователем",
+                {"step_id": step_id, "approval_id": approval["id"]},
                 task_id=task_id,
                 step_id=step_id,
             )
@@ -853,6 +898,116 @@ class ComputerExecutor:
         )
         store.update_task_status(task_id, "running")
         return True
+
+    def _handle_password_entry(self, run: dict, step: dict, task: dict) -> StepResult:
+        run_id = run["id"]
+        task_id = task["id"]
+        step_id = step["id"]
+
+        emit(
+            run_id,
+            "user_action_required",
+            "Требуется ввод пароля вручную",
+            {"kind": "enter_password", "instructions": "Введите пароль/код вручную и подтвердите продолжение."},
+            task_id=task_id,
+            step_id=step_id,
+        )
+
+        approval_type = approval_type_from_flags(step.get("danger_flags") or ["password"])
+        preview = build_preview_for_step(run, step, approval_type)
+        preview["details"] = {**(preview.get("details") or {}), "action": "enter_password_manual"}
+
+        approval = store.create_approval(
+            run_id=run_id,
+            task_id=task_id,
+            step_id=step_id,
+            scope="password_entry",
+            approval_type=approval_type,
+            title=preview.get("summary") or "Введите пароль вручную",
+            description=preview.get("risk") or "Astra не вводит пароли автоматически.",
+            proposed_actions=proposed_actions_from_preview(approval_type, preview),
+            preview=preview,
+        )
+
+        emit(
+            run_id,
+            "approval_requested",
+            "Запрошено подтверждение",
+            {
+                "approval_id": approval["id"],
+                "approval_type": approval.get("approval_type"),
+                "step_id": step_id,
+                "preview_summary": preview_summary(preview),
+                "scope": approval.get("scope"),
+                "title": approval.get("title"),
+                "description": approval.get("description"),
+            },
+            task_id=task_id,
+            step_id=step_id,
+        )
+        emit(
+            run_id,
+            "step_paused_for_approval",
+            "Ожидание ввода пароля",
+            {"approval_id": approval["id"], "preview": preview},
+            task_id=task_id,
+            step_id=step_id,
+        )
+
+        store.update_task_status(task_id, "waiting_approval")
+        approval = self._wait_for_approval(run_id, approval["id"])
+        emit(
+            run_id,
+            "approval_resolved",
+            "Подтверждение завершено",
+            {
+                "approval_id": approval["id"],
+                "status": approval["status"],
+                "decision": approval.get("decision"),
+                "approval_type": approval.get("approval_type"),
+                "step_id": step_id,
+            },
+            task_id=task_id,
+            step_id=step_id,
+        )
+
+        if approval["status"] != "approved":
+            emit(
+                run_id,
+                "approval_rejected",
+                "Подтверждение отклонено",
+                {"approval_id": approval["id"]},
+                task_id=task_id,
+                step_id=step_id,
+            )
+            emit(
+                run_id,
+                "step_cancelled_by_user",
+                "Шаг отменён пользователем",
+                {"step_id": step_id, "approval_id": approval["id"]},
+                task_id=task_id,
+                step_id=step_id,
+            )
+            return StepResult("failed", "password_rejected", 0, 1, None)
+
+        emit(
+            run_id,
+            "approval_approved",
+            "Подтверждение принято",
+            {"approval_id": approval["id"]},
+            task_id=task_id,
+            step_id=step_id,
+        )
+        store.update_task_status(task_id, "running")
+        emit(
+            run_id,
+            "step_execution_finished",
+            "Пароль введён пользователем",
+            {"status": "done", "reason": "user_entered_password", "micro_steps": 0},
+            task_id=task_id,
+            step_id=step_id,
+        )
+        return StepResult("done", "user_entered_password", 0, 1, None)
 
     def _wait_for_approval(self, run_id: str, approval_id: str) -> dict:
         while True:

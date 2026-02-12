@@ -13,6 +13,12 @@ from core.event_bus import emit
 from core.brain import LLMRequest, get_brain
 from core.llm_routing import ContextItem
 from core.skills.result_types import ArtifactCandidate, FactCandidate, SkillResult
+from core.safety.approvals import (
+    approval_type_from_flags,
+    build_preview_for_step,
+    preview_summary,
+    proposed_actions_from_preview,
+)
 from memory import store
 
 ALLOWED_ACTIONS = {
@@ -356,16 +362,24 @@ class AutopilotComputerSkill:
     def _request_confirm(self, ctx, goal: str, ask_confirm: dict, actions: list[dict]) -> ApprovalContext:
         title = ask_confirm.get("reason") or "Подтвердите действие"
         description = ask_confirm.get("proposed_effect") or goal
+        approval_type = approval_type_from_flags(ctx.plan_step.get("danger_flags") or [])
+        preview = build_preview_for_step(ctx.run, ctx.plan_step, approval_type)
         approval = store.create_approval(
             run_id=ctx.run["id"],
             task_id=ctx.task["id"],
+            step_id=ctx.plan_step.get("id"),
             scope="autopilot",
+            approval_type=approval_type,
             title=title,
             description=description,
-            proposed_actions=actions,
+            proposed_actions=proposed_actions_from_preview(approval_type, preview),
+            preview=preview,
         )
         emit(ctx.run["id"], "approval_requested", "Запрошено подтверждение", {
             "approval_id": approval["id"],
+            "approval_type": approval.get("approval_type"),
+            "step_id": ctx.plan_step.get("id"),
+            "preview_summary": preview_summary(preview),
             "scope": approval["scope"],
             "title": approval["title"],
             "description": approval["description"],
@@ -386,6 +400,8 @@ class AutopilotComputerSkill:
                 "approval_id": approval["id"],
                 "status": approval.get("status"),
                 "decision": approval.get("decision"),
+                "approval_type": approval.get("approval_type"),
+                "step_id": ctx.plan_step.get("id"),
             }, task_id=ctx.task["id"], step_id=ctx.plan_step["id"])
         if approval and approval.get("status") == "approved":
             emit(ctx.run["id"], "approval_approved", "Подтверждение принято", {"approval_id": approval["id"]}, task_id=ctx.task["id"], step_id=ctx.plan_step["id"])

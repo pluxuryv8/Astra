@@ -63,7 +63,8 @@ def _make_run():
     return run
 
 
-def _make_step(run_id: str, requires_approval: bool = False):
+def _make_step(run_id: str, requires_approval: bool = False, danger_flags: list[str] | None = None):
+    danger_flags = danger_flags or (["delete_file"] if requires_approval else [])
     step = {
         "id": "step-1",
         "run_id": run_id,
@@ -75,7 +76,7 @@ def _make_step(run_id: str, requires_approval: bool = False):
         "status": "created",
         "kind": "COMPUTER_ACTIONS",
         "success_criteria": "Экран изменился",
-        "danger_flags": ["delete_file"] if requires_approval else [],
+        "danger_flags": danger_flags,
         "requires_approval": requires_approval,
         "artifacts_expected": [],
     }
@@ -154,10 +155,99 @@ def test_executor_requires_approval(tmp_path):
     task = _make_task(run["id"], step["id"])
 
     img_a = base64.b64encode(b"a").decode("utf-8")
+    img_b = base64.b64encode(b"b").decode("utf-8")
+    bridge = StubBridge([
+        {"image_base64": img_a, "width": 2, "height": 2},
+        {"image_base64": img_b, "width": 2, "height": 2},
+        {"image_base64": img_b, "width": 2, "height": 2},
+    ])
+    brain = StubBrain([{ "action_type": "click", "x": 1, "y": 1 }, { "action_type": "done" }])
+    config = ExecutorConfig(max_micro_steps=2, wait_timeout_ms=0, wait_poll_ms=0, wait_after_act_ms=0)
+    executor = ComputerExecutor(ROOT, bridge=bridge, config=config, brain=brain)
+
+    result_holder: dict[str, object] = {}
+
+    def run_exec():
+        result_holder["result"] = executor.execute_step(run, step, task)
+
+    thread = threading.Thread(target=run_exec)
+    thread.start()
+
+    approval_id = None
+    for _ in range(20):
+        approvals = store.list_approvals(run["id"])
+        if approvals:
+            approval_id = approvals[0]["id"]
+            break
+        time.sleep(0.05)
+
+    assert approval_id is not None
+    assert bridge.actions == []
+    store.update_approval_status(approval_id, "approved", "test")
+
+    thread.join(timeout=2)
+    result = result_holder.get("result")
+    assert result is not None
+    assert getattr(result, "status") == "done"
+
+    events = store.list_events(run["id"], limit=200)
+    event_types = {e["type"] for e in events}
+    assert "approval_requested" in event_types
+    assert "step_paused_for_approval" in event_types
+
+
+def test_executor_reject_stops(tmp_path):
+    _prepare_store(tmp_path)
+    run = _make_run()
+    step = _make_step(run["id"], requires_approval=True)
+    task = _make_task(run["id"], step["id"])
+
+    img_a = base64.b64encode(b"a").decode("utf-8")
     bridge = StubBridge([
         {"image_base64": img_a, "width": 2, "height": 2},
     ])
     brain = StubBrain([{ "action_type": "done" }])
+    config = ExecutorConfig(max_micro_steps=1, wait_timeout_ms=0, wait_poll_ms=0, wait_after_act_ms=0)
+    executor = ComputerExecutor(ROOT, bridge=bridge, config=config, brain=brain)
+
+    result_holder: dict[str, object] = {}
+
+    def run_exec():
+        result_holder["result"] = executor.execute_step(run, step, task)
+
+    thread = threading.Thread(target=run_exec)
+    thread.start()
+
+    approval_id = None
+    for _ in range(20):
+        approvals = store.list_approvals(run["id"])
+        if approvals:
+            approval_id = approvals[0]["id"]
+            break
+        time.sleep(0.05)
+
+    assert approval_id is not None
+    store.update_approval_status(approval_id, "rejected", "test")
+
+    thread.join(timeout=2)
+    result = result_holder.get("result")
+    assert result is not None
+    assert getattr(result, "status") == "failed"
+    assert bridge.actions == []
+
+    events = store.list_events(run["id"], limit=200)
+    event_types = {e["type"] for e in events}
+    assert "step_cancelled_by_user" in event_types
+
+
+def test_password_flag_requires_user_action(tmp_path):
+    _prepare_store(tmp_path)
+    run = _make_run()
+    step = _make_step(run["id"], requires_approval=True, danger_flags=["password"])
+    task = _make_task(run["id"], step["id"])
+
+    bridge = StubBridge([])
+    brain = StubBrain([{ "action_type": "type", "text": "secret" }])
     config = ExecutorConfig(max_micro_steps=1, wait_timeout_ms=0, wait_poll_ms=0, wait_after_act_ms=0)
     executor = ComputerExecutor(ROOT, bridge=bridge, config=config, brain=brain)
 
@@ -184,8 +274,8 @@ def test_executor_requires_approval(tmp_path):
     result = result_holder.get("result")
     assert result is not None
     assert getattr(result, "status") == "done"
+    assert bridge.actions == []
 
     events = store.list_events(run["id"], limit=200)
     event_types = {e["type"] for e in events}
-    assert "approval_requested" in event_types
-    assert "step_paused_for_approval" in event_types
+    assert "user_action_required" in event_types

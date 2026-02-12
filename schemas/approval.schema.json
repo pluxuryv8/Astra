@@ -7,16 +7,20 @@
     "id": {"type": "string"},
     "run_id": {"type": "string"},
     "task_id": {"type": "string"},
+    "step_id": {"type": ["string", "null"]},
     "created_at": {"type": "string"},
     "scope": {"type": "string"},
+    "approval_type": {"type": "string"},
     "title": {"type": "string"},
     "description": {"type": ["string", "null"]},
     "proposed_actions": {"type": "array", "items": {"type": "object"}},
+    "preview": {"type": ["object", "null"]},
     "status": {"type": "string", "enum": ["pending", "approved", "rejected", "expired"]},
     "decided_at": {"type": ["string", "null"]},
+    "resolved_at": {"type": ["string", "null"]},
     "decided_by": {"type": ["string", "null"]},
     "decision": {"type": ["object", "null"]}
   },
-  "required": ["id", "run_id", "task_id", "created_at", "scope", "title", "proposed_actions", "status"],
+  "required": ["id", "run_id", "task_id", "created_at", "scope", "approval_type", "title", "proposed_actions", "preview", "status", "resolved_at"],
   "additionalProperties": false
 }

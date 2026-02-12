@@ -66,6 +66,8 @@ const EVENT_TYPES = [
   "approval_resolved",
   "approval_approved",
   "approval_rejected",
+  "step_cancelled_by_user",
+  "user_action_required",
   "autopilot_state",
   "autopilot_action"
 ];

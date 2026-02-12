@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from core.event_bus import emit
+from core.safety.approvals import build_cloud_financial_preview, preview_summary, proposed_actions_from_preview
 from memory import store
 
 SOURCE_TYPES = {
@@ -337,17 +338,29 @@ def request_cloud_approval(ctx, decision: RoutingDecision, items: list[ContextIt
     if not decision.required_approval:
         return False
 
-    preview = _build_approval_preview(items)
-    title = "Allow sending financial file to cloud"
-    description = "Approval required to send financial file content to cloud.\n\nPreview:\n" + preview
+    flags = PolicyFlags.from_settings(ctx.settings if ctx else {})
+    redaction = sanitize_context_items(items, allow_financial_file=True, flags=flags)
+    preview = build_cloud_financial_preview(
+        [
+            {"source_type": item.source_type, "provenance": item.provenance}
+            for item in items
+            if item.source_type == "file_content"
+        ],
+        redaction_summary=redaction.removed_counts_by_source,
+    )
+    title = "Подтверждение отправки финансовых данных"
+    description = preview.get("risk") or "Approval required to send financial file content to cloud."
 
     approval = store.create_approval(
         run_id=ctx.run["id"],
         task_id=ctx.task["id"],
+        step_id=ctx.plan_step.get("id") if ctx and ctx.plan_step else None,
         scope=decision.required_approval,
+        approval_type="CLOUD_FINANCIAL",
         title=title,
         description=description,
-        proposed_actions=[{"type": "cloud_llm_request", "reason": decision.reason, "preview": preview}],
+        proposed_actions=proposed_actions_from_preview("CLOUD_FINANCIAL", preview),
+        preview=preview,
     )
     emit(
         ctx.run["id"],
@@ -355,10 +368,12 @@ def request_cloud_approval(ctx, decision: RoutingDecision, items: list[ContextIt
         "Approval requested",
         {
             "approval_id": approval["id"],
+            "approval_type": approval.get("approval_type"),
+            "step_id": approval.get("step_id"),
+            "preview_summary": preview_summary(preview),
             "scope": approval["scope"],
             "title": approval["title"],
             "description": approval["description"],
-            "proposed_actions": approval["proposed_actions"],
         },
         task_id=ctx.task["id"],
         step_id=ctx.plan_step["id"],
@@ -389,6 +404,8 @@ def request_cloud_approval(ctx, decision: RoutingDecision, items: list[ContextIt
                 "approval_id": approval["id"],
                 "status": approval.get("status"),
                 "decision": approval.get("decision"),
+                "approval_type": approval.get("approval_type"),
+                "step_id": approval.get("step_id"),
             },
             task_id=ctx.task["id"],
             step_id=ctx.plan_step["id"],

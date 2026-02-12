@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/user_action_required.schema.json",
+  "title": "user_action_required",
+  "type": "object",
+  "properties": {
+    "kind": {"type": "string"},
+    "instructions": {"type": "string"}
+  },
+  "required": ["kind", "instructions"],
+  "additionalProperties": false
+}

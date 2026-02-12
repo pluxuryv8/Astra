@@ -249,6 +249,8 @@ class RunEngine:
                 task_id=task["id"],
                 step_id=step["id"],
             )
+            if result.reason in ("approval_rejected", "password_rejected"):
+                raise RuntimeError(result.reason)
             return task
 
         if manifest.scopes in ("confirm_required", "dangerous") and run["mode"] != "execute_confirm":

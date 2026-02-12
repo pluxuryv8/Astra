@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/step_cancelled_by_user.schema.json",
+  "title": "step_cancelled_by_user",
+  "type": "object",
+  "properties": {
+    "step_id": {"type": "string"},
+    "approval_id": {"type": "string"}
+  },
+  "required": ["step_id", "approval_id"],
+  "additionalProperties": false
+}

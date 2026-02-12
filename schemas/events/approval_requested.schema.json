@@ -7,6 +7,15 @@
     "approval_id": {
       "type": "string"
     },
+    "approval_type": {
+      "type": "string"
+    },
+    "step_id": {
+      "type": ["string", "null"]
+    },
+    "preview_summary": {
+      "type": "string"
+    },
     "scope": {
       "type": "string"
     },
@@ -28,10 +37,12 @@
   },
   "required": [
     "approval_id",
+    "approval_type",
+    "preview_summary",
+    "step_id",
     "scope",
     "title",
-    "description",
-    "proposed_actions"
+    "description"
   ],
   "additionalProperties": false
 }

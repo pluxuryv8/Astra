@@ -681,30 +681,71 @@ def get_fact(fact_id: str) -> Optional[dict]:
     }
 
 
-def create_approval(run_id: str, task_id: str, scope: str, title: str, description: str, proposed_actions: list[dict], decision: dict | None = None) -> dict:
+def create_approval(
+    run_id: str,
+    task_id: str,
+    scope: str,
+    title: str,
+    description: str,
+    proposed_actions: list[dict],
+    decision: dict | None = None,
+    *,
+    step_id: str | None = None,
+    approval_type: str | None = None,
+    preview: dict | None = None,
+) -> dict:
     approval_id = _uuid()
     created_at = now_iso()
     conn = _conn_or_raise()
+    if approval_type is None:
+        approval_type = "ACCOUNT_CHANGE"
+    if preview is None:
+        preview = {
+            "summary": title,
+            "details": {},
+            "risk": "Опасное действие",
+            "suggested_user_action": "Подтвердите выполнение",
+            "expires_in_ms": None,
+        }
+    preview_json = _json_dump(preview) if preview is not None else None
     with _lock:
         conn.execute(
             """
-            INSERT INTO approvals (id, run_id, task_id, created_at, scope, title, description, proposed_actions, status, decision_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO approvals (id, run_id, task_id, created_at, scope, title, description, proposed_actions, status, decision_json, step_id, approval_type, preview_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (approval_id, run_id, task_id, created_at, scope, title, description, _json_dump(proposed_actions), "pending", _json_dump(decision) if decision else None),
+            (
+                approval_id,
+                run_id,
+                task_id,
+                created_at,
+                scope,
+                title,
+                description,
+                _json_dump(proposed_actions),
+                "pending",
+                _json_dump(decision) if decision else None,
+                step_id,
+                approval_type,
+                preview_json,
+            ),
         )
         conn.commit()
     return {
         "id": approval_id,
         "run_id": run_id,
         "task_id": task_id,
+        "step_id": step_id,
         "created_at": created_at,
         "scope": scope,
+        "approval_type": approval_type,
         "title": title,
         "description": description,
         "proposed_actions": proposed_actions,
+        "preview": preview,
         "status": "pending",
         "decided_at": None,
+        "resolved_at": None,
         "decided_by": None,
         "decision": decision,
     }
@@ -718,15 +759,19 @@ def list_approvals(run_id: str) -> list[dict]:
             "id": r["id"],
             "run_id": r["run_id"],
             "task_id": r["task_id"],
+            "step_id": r["step_id"] if "step_id" in r.keys() else None,
             "created_at": r["created_at"],
             "scope": r["scope"],
+            "approval_type": r["approval_type"] if "approval_type" in r.keys() else None,
             "title": r["title"],
             "description": r["description"],
             "proposed_actions": _json_load(r["proposed_actions"]) or [],
             "status": r["status"],
             "decided_at": r["decided_at"],
+            "resolved_at": r["decided_at"],
             "decided_by": r["decided_by"],
             "decision": _json_load(r["decision_json"]) if "decision_json" in r.keys() else None,
+            "preview": _json_load(r["preview_json"]) if "preview_json" in r.keys() else None,
         }
         for r in rows
     ]
@@ -741,15 +786,19 @@ def get_approval(approval_id: str) -> Optional[dict]:
         "id": row["id"],
         "run_id": row["run_id"],
         "task_id": row["task_id"],
+        "step_id": row["step_id"] if "step_id" in row.keys() else None,
         "created_at": row["created_at"],
         "scope": row["scope"],
+        "approval_type": row["approval_type"] if "approval_type" in row.keys() else None,
         "title": row["title"],
         "description": row["description"],
         "proposed_actions": _json_load(row["proposed_actions"]) or [],
         "status": row["status"],
         "decided_at": row["decided_at"],
+        "resolved_at": row["decided_at"],
         "decided_by": row["decided_by"],
         "decision": _json_load(row["decision_json"]) if "decision_json" in row.keys() else None,
+        "preview": _json_load(row["preview_json"]) if "preview_json" in row.keys() else None,
     }
 
 
@@ -767,6 +816,7 @@ def update_approval_status(approval_id: str, status: str, decided_by: str, decis
         conn.commit()
     approval["status"] = status
     approval["decided_at"] = decided_at
+    approval["resolved_at"] = decided_at
     approval["decided_by"] = decided_by
     approval["decision"] = decision
     return approval

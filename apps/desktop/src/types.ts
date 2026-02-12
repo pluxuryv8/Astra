@@ -81,13 +81,17 @@ export type Approval = {
   id: string;
   run_id?: string;
   task_id?: string;
+  step_id?: string | null;
   scope?: string;
+  approval_type?: string | null;
   created_at?: string;
   status: string;
   title: string;
   description?: string | null;
   proposed_actions?: Record<string, unknown>[];
+  preview?: Record<string, unknown> | null;
   decided_at?: string | null;
+  resolved_at?: string | null;
   decided_by?: string | null;
   decision?: Record<string, unknown> | null;
 };

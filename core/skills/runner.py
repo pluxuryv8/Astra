@@ -9,6 +9,12 @@ from core.skill_context import SkillContext
 from core.skills.registry import SkillRegistry
 from core.skills.schemas import load_schema, validate_inputs
 from core.skills.result_types import SkillResult
+from core.safety.approvals import (
+    approval_type_from_flags,
+    build_preview_for_step,
+    preview_summary,
+    proposed_actions_from_preview,
+)
 from memory import store
 
 
@@ -38,21 +44,29 @@ class SkillRunner:
             elif hasattr(skill_module, "build_approval"):
                 approval_payload = skill_module.build_approval(inputs, ctx)
 
+            approval_type = approval_type_from_flags(step.get("danger_flags") or [])
+            preview = build_preview_for_step(run, step, approval_type)
+
             if not approval_payload:
                 approval_payload = {
                     "scope": manifest.name,
-                    "title": f"Подтверждение: {manifest.name}",
-                    "description": "Требуется подтверждение",
-                    "proposed_actions": inputs.get("actions") or [],
+                    "title": preview.get("summary") or f"Подтверждение: {manifest.name}",
+                    "description": preview.get("risk") or "Требуется подтверждение",
+                    "proposed_actions": proposed_actions_from_preview(approval_type, preview),
+                    "approval_type": approval_type,
+                    "preview": preview,
                 }
 
             approval = store.create_approval(
                 run_id=run["id"],
                 task_id=task["id"],
+                step_id=step.get("id"),
                 scope=approval_payload.get("scope") or manifest.name,
+                approval_type=approval_payload.get("approval_type") or approval_type,
                 title=approval_payload.get("title") or "Требуется подтверждение",
                 description=approval_payload.get("description") or "",
                 proposed_actions=approval_payload.get("proposed_actions") or [],
+                preview=approval_payload.get("preview") or preview,
             )
 
             emit(
@@ -61,6 +75,9 @@ class SkillRunner:
                 "Запрошено подтверждение",
                 {
                     "approval_id": approval["id"],
+                    "approval_type": approval.get("approval_type"),
+                    "step_id": step.get("id"),
+                    "preview_summary": preview_summary(approval_payload.get("preview") or preview),
                     "scope": approval["scope"],
                     "title": approval["title"],
                     "description": approval["description"],
@@ -94,6 +111,8 @@ class SkillRunner:
                     "approval_id": approval["id"],
                     "status": approval["status"],
                     "decision": approval.get("decision"),
+                    "approval_type": approval.get("approval_type"),
+                    "step_id": step.get("id"),
                 },
                 task_id=task["id"],
                 step_id=step["id"],
@@ -104,6 +123,14 @@ class SkillRunner:
                     "approval_rejected",
                     "Подтверждение отклонено",
                     {"approval_id": approval["id"]},
+                    task_id=task["id"],
+                    step_id=step["id"],
+                )
+                emit(
+                    run["id"],
+                    "step_cancelled_by_user",
+                    "Шаг отменён пользователем",
+                    {"step_id": step.get("id"), "approval_id": approval["id"]},
                     task_id=task["id"],
                     step_id=step["id"],
                 )
