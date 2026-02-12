@@ -236,7 +236,7 @@ def insert_plan_steps(run_id: str, steps: list[dict]) -> list[dict]:
         for step in steps:
             kind = step.get("kind") or _infer_plan_step_kind(step.get("skill_name"))
             conn.execute(
-                "INSERT INTO plan_steps (id, run_id, step_index, title, skill_name, inputs, depends_on, status, kind, success_criteria, danger_flags, requires_approval, artifacts_expected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO plan_steps (id, run_id, step_index, title, skill_name, inputs, depends_on, status, kind, success_criteria, success_checks, danger_flags, requires_approval, artifacts_expected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     step["id"],
                     run_id,
@@ -248,6 +248,7 @@ def insert_plan_steps(run_id: str, steps: list[dict]) -> list[dict]:
                     step.get("status", "created"),
                     kind,
                     _json_dump(step.get("success_criteria") or ""),
+                    _json_dump(step.get("success_checks") or []),
                     _json_dump(step.get("danger_flags") or []),
                     1 if step.get("requires_approval") else 0,
                     _json_dump(step.get("artifacts_expected") or []),
@@ -275,6 +276,7 @@ def list_plan_steps(run_id: str) -> list[dict]:
             "status": r["status"],
             "kind": r["kind"] or _infer_plan_step_kind(r["skill_name"]),
             "success_criteria": _json_load(r["success_criteria"]) or "",
+            "success_checks": _json_load(r["success_checks"]) or [],
             "danger_flags": _json_load(r["danger_flags"]) or [],
             "requires_approval": bool(r["requires_approval"]) if r["requires_approval"] is not None else False,
             "artifacts_expected": _json_load(r["artifacts_expected"]) or [],
@@ -299,6 +301,7 @@ def get_plan_step(step_id: str) -> Optional[dict]:
         "status": row["status"],
         "kind": row["kind"] or _infer_plan_step_kind(row["skill_name"]),
         "success_criteria": _json_load(row["success_criteria"]) or "",
+        "success_checks": _json_load(row["success_checks"]) or [],
         "danger_flags": _json_load(row["danger_flags"]) or [],
         "requires_approval": bool(row["requires_approval"]) if row["requires_approval"] is not None else False,
         "artifacts_expected": _json_load(row["artifacts_expected"]) or [],

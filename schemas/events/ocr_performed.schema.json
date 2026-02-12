@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/ocr_performed.schema.json",
+  "title": "ocr_performed",
+  "type": "object",
+  "properties": {
+    "hash": {"type": "string"},
+    "text_len": {"type": "integer"},
+    "duration_ms": {"type": "integer"},
+    "engine": {"type": "string"}
+  },
+  "required": ["hash", "text_len", "duration_ms", "engine"],
+  "additionalProperties": false
+}

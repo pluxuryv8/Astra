@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/ocr_cached_hit.schema.json",
+  "title": "ocr_cached_hit",
+  "type": "object",
+  "properties": {
+    "hash": {"type": "string"}
+  },
+  "required": ["hash"],
+  "additionalProperties": false
+}

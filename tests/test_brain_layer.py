@@ -124,6 +124,15 @@ def test_sanitizer_removes_telegram():
     assert result.removed_counts_by_source["telegram_text"] == 1
 
 
+def test_sanitizer_removes_screenshot_text():
+    items = [
+        ContextItem(content="ocr", source_type="screenshot_text", sensitivity="confidential"),
+        ContextItem(content="web", source_type="web_page_text", sensitivity="public"),
+    ]
+    result = sanitize_context_items(items, allow_financial_file=False, flags=PolicyFlags())
+    assert result.removed_counts_by_source["screenshot_text"] == 1
+
+
 def test_financial_file_requires_approval(monkeypatch):
     monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
 

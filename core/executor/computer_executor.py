@@ -12,7 +12,9 @@ from core.brain import get_brain
 from core.brain.types import LLMRequest, LLMResponse
 from core.bridge.desktop_bridge import DesktopBridge
 from core.event_bus import emit
+from core.executor.success_criteria import evaluate_success_checks, normalize_success_checks
 from core.llm_routing import ContextItem
+from core.ocr import OCRCache, OCRResult, get_default_provider
 from memory import store
 
 
@@ -48,6 +50,8 @@ class ExecutorConfig:
     screenshot_width: int = 1280
     screenshot_quality: int = 60
     dry_run: bool = False
+    ocr_enabled: bool = True
+    ocr_lang: str = "eng+rus"
 
     @classmethod
     def from_env_and_settings(cls, settings: dict | None) -> "ExecutorConfig":
@@ -68,6 +72,12 @@ class ExecutorConfig:
                 return default
             return raw.strip().lower() in {"1", "true", "yes", "on"}
 
+        def _env_str(name: str, default: str) -> str:
+            raw = os.getenv(name)
+            if raw is None:
+                return default
+            return raw
+
         return cls(
             max_micro_steps=_env_int("ASTRA_EXECUTOR_MAX_MICRO_STEPS", int(cfg.get("max_micro_steps", 30))),
             max_no_progress=_env_int("ASTRA_EXECUTOR_MAX_NO_PROGRESS", int(cfg.get("max_no_progress", 5))),
@@ -79,6 +89,8 @@ class ExecutorConfig:
             screenshot_width=_env_int("ASTRA_EXECUTOR_SCREENSHOT_WIDTH", int(cfg.get("screenshot_width", 1280))),
             screenshot_quality=_env_int("ASTRA_EXECUTOR_SCREENSHOT_QUALITY", int(cfg.get("screenshot_quality", 60))),
             dry_run=_env_bool("ASTRA_EXECUTOR_DRY_RUN", bool(cfg.get("dry_run", False))),
+            ocr_enabled=_env_bool("ASTRA_OCR_ENABLED", bool(cfg.get("ocr_enabled", True))),
+            ocr_lang=_env_str("ASTRA_OCR_LANG", str(cfg.get("ocr_lang", "eng+rus"))),
         )
 
 
@@ -88,6 +100,8 @@ class Observation:
     width: int
     height: int
     ts: float
+    image_bytes: bytes | None = None
+    ocr_text: str | None = None
 
 
 @dataclass
@@ -142,17 +156,20 @@ _SYSTEM_PROMPT = (
 
 
 class ComputerExecutor:
-    def __init__(self, base_dir, bridge: DesktopBridge | None = None, config: ExecutorConfig | None = None, brain=None) -> None:
+    def __init__(self, base_dir, bridge: DesktopBridge | None = None, config: ExecutorConfig | None = None, brain=None, ocr_provider=None, ocr_cache: OCRCache | None = None) -> None:
         self.base_dir = base_dir
         self.bridge = bridge or DesktopBridge()
         self.config = config
         self.brain = brain
+        self.ocr_provider = ocr_provider
+        self.ocr_cache = ocr_cache or OCRCache()
 
     def execute_step(self, run: dict, step: dict, task: dict) -> StepResult:
         cfg = self.config or ExecutorConfig.from_env_and_settings(run.get("settings") or {})
         run_id = run["id"]
         step_id = step["id"]
         task_id = task["id"]
+        success_checks = normalize_success_checks(step.get("success_checks"), step.get("success_criteria"))
 
         emit(
             run_id,
@@ -283,7 +300,7 @@ class ComputerExecutor:
                 time.sleep(cfg.wait_after_act_ms / 1000)
 
             obs_after = self._observe(run_id, step_id, task_id, "after", obs_before, cfg)
-            verify_result, verify_details, final_obs = self._verify_progress(run_id, step_id, task_id, obs_before, obs_after, cfg)
+            verify_result, verify_details, final_obs = self._verify_progress(run_id, step_id, task_id, obs_before, obs_after, cfg, success_checks)
             emit(
                 run_id,
                 "verification_result",
@@ -293,11 +310,22 @@ class ComputerExecutor:
                 step_id=step_id,
             )
 
+            if verify_result == "PASS":
+                emit(
+                    run_id,
+                    "step_execution_finished",
+                    "Шаг завершён по критериям",
+                    {"status": "done", "reason": "criteria_met", "micro_steps": micro_steps + 1},
+                    task_id=task_id,
+                    step_id=step_id,
+                )
+                return StepResult("done", "criteria_met", micro_steps + 1, 1, final_obs)
+
             micro_steps += 1
             last_action_summary = self._summarize_action(action)
             last_observation = final_obs
 
-            if verify_result == "pass_progress":
+            if verify_result in ("PASS_PROGRESS", "PASS"):
                 no_progress = 0
             else:
                 no_progress += 1
@@ -349,7 +377,10 @@ class ComputerExecutor:
             width=int(capture.get("width") or 0),
             height=int(capture.get("height") or 0),
             ts=time.time(),
+            image_bytes=image_bytes,
         )
+        if prev and prev.hash == obs.hash and prev.ocr_text:
+            obs.ocr_text = prev.ocr_text
         changed = bool(prev and prev.hash and obs.hash and prev.hash != obs.hash)
         emit(
             run_id,
@@ -420,6 +451,15 @@ class ComputerExecutor:
                 provenance="observation_summary",
             ),
         ]
+        if obs.ocr_text:
+            context_items.append(
+                ContextItem(
+                    content=obs.ocr_text[:2000],
+                    source_type="screenshot_text",
+                    sensitivity="confidential",
+                    provenance="ocr",
+                )
+            )
 
         def render_messages(items: list[ContextItem]) -> list[dict[str, Any]]:
             user_goal = payload["user_goal"]
@@ -553,36 +593,96 @@ class ComputerExecutor:
             return False
         return True
 
-    def _verify_progress(self, run_id: str, step_id: str, task_id: str, before: Observation, after: Observation, cfg: ExecutorConfig) -> tuple[str, dict, Observation]:
+    def _verify_progress(
+        self,
+        run_id: str,
+        step_id: str,
+        task_id: str,
+        before: Observation,
+        after: Observation,
+        cfg: ExecutorConfig,
+        success_checks: list[dict] | None,
+    ) -> tuple[str, dict, Observation]:
         if before.hash and after.hash and before.hash != after.hash:
-            return "pass_progress", {"change": "hash_changed"}, after
-
-        waited_ms = 0
-        current = after
-        while waited_ms < cfg.wait_timeout_ms:
-            time.sleep(cfg.wait_poll_ms / 1000)
-            waited_ms += cfg.wait_poll_ms
-            current = self._observe(run_id, step_id, task_id, "wait", before, cfg)
-            if before.hash and current.hash and before.hash != current.hash:
+            result, details, final_obs = "PASS_PROGRESS", {"change": "hash_changed"}, after
+        else:
+            waited_ms = 0
+            current = after
+            while waited_ms < cfg.wait_timeout_ms:
+                time.sleep(cfg.wait_poll_ms / 1000)
+                waited_ms += cfg.wait_poll_ms
+                current = self._observe(run_id, step_id, task_id, "wait", before, cfg)
+                if before.hash and current.hash and before.hash != current.hash:
+                    emit(
+                        run_id,
+                        "step_waiting",
+                        "Ожидание загрузки",
+                        {"reason": "screen_change", "waited_ms": waited_ms},
+                        task_id=task_id,
+                        step_id=step_id,
+                    )
+                    result, details, final_obs = "PASS_PROGRESS", {"waited_ms": waited_ms}, current
+                    break
+            else:
                 emit(
                     run_id,
                     "step_waiting",
-                    "Ожидание загрузки",
-                    {"reason": "screen_change", "waited_ms": waited_ms},
+                    "Ожидание без изменений",
+                    {"reason": "no_change", "waited_ms": waited_ms},
                     task_id=task_id,
                     step_id=step_id,
                 )
-                return "pass_progress", {"waited_ms": waited_ms}, current
+                result, details, final_obs = "TIMEOUT", {"waited_ms": waited_ms}, current
 
+        if success_checks:
+            ocr_result = self._get_ocr_result(run_id, step_id, task_id, final_obs, cfg)
+            if ocr_result and ocr_result.text:
+                final_obs.ocr_text = ocr_result.text
+                if evaluate_success_checks(success_checks, ocr_result.text):
+                    return "PASS", {"ocr": "matched", **details}, final_obs
+                details = {**details, "ocr": "not_matched"}
+            else:
+                details = {**details, "ocr": "empty"}
+
+        return result, details, final_obs
+
+    def _get_ocr_result(self, run_id: str, step_id: str, task_id: str, obs: Observation, cfg: ExecutorConfig) -> OCRResult | None:
+        if not cfg.ocr_enabled or not obs.hash or not obs.image_bytes:
+            return None
+        cached = self.ocr_cache.get(obs.hash)
+        if cached:
+            emit(
+                run_id,
+                "ocr_cached_hit",
+                "OCR кэш",
+                {"hash": obs.hash},
+                task_id=task_id,
+                step_id=step_id,
+            )
+            return cached
+
+        provider = self.ocr_provider or get_default_provider()
+        if provider is None:
+            return None
+
+        start = time.time()
+        result = provider.extract(obs.image_bytes, lang=cfg.ocr_lang)
+        duration_ms = int((time.time() - start) * 1000)
+        self.ocr_cache.set(obs.hash, result)
         emit(
             run_id,
-            "step_waiting",
-            "Ожидание без изменений",
-            {"reason": "no_change", "waited_ms": waited_ms},
+            "ocr_performed",
+            "OCR выполнен",
+            {
+                "hash": obs.hash,
+                "text_len": len(result.text or ""),
+                "duration_ms": duration_ms,
+                "engine": getattr(provider, "name", "unknown"),
+            },
             task_id=task_id,
             step_id=step_id,
         )
-        return "timeout", {"waited_ms": waited_ms}, current
+        return result
 
     def _summarize_action(self, action: dict) -> str:
         action_type = action.get("type")

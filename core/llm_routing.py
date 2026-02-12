@@ -186,6 +186,9 @@ def sanitize_context_items(items: list[ContextItem], allow_financial_file: bool,
         if item.source_type == "telegram_text":
             removed_counts[item.source_type] += 1
             continue
+        if item.source_type == "screenshot_text":
+            removed_counts[item.source_type] += 1
+            continue
         if item.source_type == "file_content" and item.sensitivity == "financial" and not allow_financial_file:
             removed_counts[item.source_type] += 1
             continue
@@ -247,6 +250,10 @@ def decide_route(intent: str | None, items: list[ContextItem], flags: PolicyFlag
     has_telegram = any(item.source_type == "telegram_text" for item in items)
     if has_telegram:
         return RoutingDecision(route=ROUTE_LOCAL, reason="telegram_text_present", required_approval=None, redaction_plan={"drop": ["telegram_text"]})
+
+    has_screenshot_text = any(item.source_type == "screenshot_text" for item in items)
+    if has_screenshot_text:
+        return RoutingDecision(route=ROUTE_LOCAL, reason="screenshot_text_present", required_approval=None, redaction_plan={"drop": ["screenshot_text"]})
 
     has_financial_file = any(item.source_type == "file_content" and item.sensitivity == "financial" for item in items)
     if has_financial_file and FINANCIAL_APPROVAL_SCOPE not in approved_scopes:
@@ -409,4 +416,3 @@ def request_cloud_approval(ctx, decision: RoutingDecision, items: list[ContextIt
     )
     store.update_task_status(ctx.task["id"], "running")
     return False
-

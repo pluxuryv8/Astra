@@ -33,6 +33,32 @@ else
   PYTHON_BIN=""
 fi
 
+# OCR checks (tesseract + python deps)
+if command -v tesseract >/dev/null 2>&1; then
+  ok "OCR engine tesseract"
+else
+  fail "OCR engine tesseract not found (install: brew install tesseract)"
+fi
+
+if [ -n "$PYTHON_BIN" ]; then
+  OCR_DEPS=$($PYTHON_BIN - <<'PY'
+try:
+    import pytesseract  # noqa: F401
+    from PIL import Image  # noqa: F401
+    print("ok")
+except Exception:
+    print("missing")
+PY
+)
+  if [ "$OCR_DEPS" = "ok" ]; then
+    ok "OCR python deps (pytesseract, pillow)"
+  else
+    fail "OCR python deps missing (pip install pytesseract pillow)"
+  fi
+else
+  warn "OCR python deps check skipped (python not found)"
+fi
+
 # Env presence (no values)
 for var in ASTRA_API_PORT ASTRA_BASE_DIR ASTRA_DATA_DIR ASTRA_DESKTOP_BRIDGE_PORT ASTRA_VAULT_PATH ASTRA_VAULT_PASSPHRASE ASTRA_LOCAL_SECRETS_PATH OPENAI_API_KEY ASTRA_SESSION_TOKEN ASTRA_LLM_LOCAL_BASE_URL ASTRA_LLM_LOCAL_CHAT_MODEL ASTRA_LLM_LOCAL_CODE_MODEL ASTRA_LLM_CLOUD_MODEL ASTRA_CLOUD_ENABLED ASTRA_AUTO_CLOUD_ENABLED ASTRA_LLM_MAX_CONCURRENCY ASTRA_LLM_MAX_RETRIES ASTRA_LLM_BACKOFF_BASE_MS ASTRA_LLM_BUDGET_PER_RUN ASTRA_LLM_BUDGET_PER_STEP; do
   if [ -n "${!var-}" ]; then

@@ -41,6 +41,8 @@
         "micro_action_executed",
         "micro_action_proposed",
         "observation_captured",
+        "ocr_cached_hit",
+        "ocr_performed",
         "plan_created",
         "run_canceled",
         "run_created",

@@ -70,6 +70,7 @@ export type PlanStep = {
   skill_name?: string;
   inputs?: Record<string, unknown>;
   success_criteria?: string;
+  success_checks?: Record<string, unknown>[];
   danger_flags?: string[];
   requires_approval?: boolean;
   artifacts_expected?: string[];

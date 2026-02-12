@@ -59,6 +59,12 @@ def test_policy_mixed_web_and_telegram_local():
     assert decision.route == ROUTE_LOCAL
 
 
+def test_policy_screenshot_text_forces_local():
+    items = [ContextItem(content="ocr", source_type="screenshot_text", sensitivity="confidential")]
+    decision = decide_route(None, items, PolicyFlags())
+    assert decision.route == ROUTE_LOCAL
+
+
 def test_sanitizer_financial_file_with_approval():
     items = [ContextItem(content="bank", source_type="file_content", sensitivity="financial")]
     flags = PolicyFlags(max_cloud_chars=100, max_cloud_item_chars=50)

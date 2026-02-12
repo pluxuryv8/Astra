@@ -24,6 +24,7 @@
     "skill_name": {"type": "string"},
     "inputs": {"type": "object"},
     "success_criteria": {"type": "string"},
+    "success_checks": {"type": "array", "items": {"type": "object"}},
     "danger_flags": {"type": "array", "items": {"type": "string"}},
     "requires_approval": {"type": "boolean"},
     "artifacts_expected": {"type": "array", "items": {"type": "string"}},
