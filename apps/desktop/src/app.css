@@ -694,6 +694,16 @@ button {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.btn.danger {
+  background: rgba(255, 120, 120, 0.16);
+  border-color: rgba(255, 120, 120, 0.35);
+  color: rgba(255, 220, 220, 1);
+}
+
+.btn.danger:hover {
+  background: rgba(255, 120, 120, 0.26);
+}
+
 .text-button {
   border: none;
   background: transparent;
@@ -888,6 +898,68 @@ button {
 .settings-field input:focus,
 .settings-panel select:focus {
   border-color: rgba(255, 255, 255, 0.22);
+}
+
+.memory-panel {
+  width: min(92vw, 620px);
+}
+
+.memory-search {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.memory-search input {
+  flex: 1;
+}
+
+.memory-list {
+  display: grid;
+  gap: 10px;
+}
+
+.memory-card {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.memory-card.pinned {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.memory-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.memory-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.memory-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.memory-content {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+
+.memory-tags {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .toggle {

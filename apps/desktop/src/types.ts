@@ -192,3 +192,16 @@ export type MemorySearchResult = {
   type: string;
   item: Record<string, unknown>;
 };
+
+export type UserMemory = {
+  id: string;
+  created_at?: string;
+  updated_at?: string;
+  title: string;
+  content: string;
+  tags?: string[];
+  source?: string;
+  is_deleted?: boolean;
+  pinned?: boolean;
+  last_used_at?: string | null;
+};

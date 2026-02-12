@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/memory_deleted.schema.json",
+  "title": "memory_deleted",
+  "type": "object",
+  "properties": {
+    "memory_id": {"type": "string"}
+  },
+  "required": ["memory_id"],
+  "additionalProperties": false
+}

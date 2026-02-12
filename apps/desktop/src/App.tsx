@@ -19,13 +19,18 @@ import {
   storeOpenAIKeyLocal,
   getLocalOpenAIStatus,
   approve,
-  reject
+  reject,
+  listUserMemory,
+  deleteUserMemory,
+  pinUserMemory,
+  unpinUserMemory
 } from "./api";
 import TopHoverBar from "./ui/TopHoverBar";
 import IdleScreen from "./ui/IdleScreen";
 import RunScreen from "./ui/RunScreen";
 import SettingsPanel from "./ui/SettingsPanel";
 import ConfirmModal from "./ui/ConfirmModal";
+import MemoryPanel from "./ui/MemoryPanel";
 import type {
   Approval,
   AutopilotActionEvent,
@@ -38,7 +43,8 @@ import type {
   ProjectSettings,
   Run,
   SnapshotMetrics,
-  Task
+  Task,
+  UserMemory
 } from "./types";
 
 const EVENT_TYPES = [
@@ -66,6 +72,10 @@ const EVENT_TYPES = [
   "approval_resolved",
   "approval_approved",
   "approval_rejected",
+  "memory_save_requested",
+  "memory_saved",
+  "memory_deleted",
+  "memory_list_viewed",
   "step_cancelled_by_user",
   "user_action_required",
   "autopilot_state",
@@ -181,6 +191,11 @@ export default function App() {
   const [mode, setMode] = useState<string>(() => localStorage.getItem(RUN_MODE_KEY) || "execute_confirm");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(isSettingsView);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [memoryItems, setMemoryItems] = useState<UserMemory[]>([]);
+  const [memoryQuery, setMemoryQuery] = useState("");
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
   const [permissions, setPermissions] = useState<PermissionsStatus | null>(null);
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [openaiKey, setOpenaiKey] = useState("");
@@ -237,6 +252,12 @@ export default function App() {
   useEffect(() => {
     isFullscreenRef.current = isFullscreen;
   }, [isFullscreen]);
+
+  useEffect(() => {
+    if (memoryOpen) {
+      void refreshMemoryList();
+    }
+  }, [memoryOpen]);
 
   useEffect(() => {
     localStorage.setItem(RUN_MODE_KEY, mode);
@@ -548,6 +569,10 @@ export default function App() {
     setSettingsOpen(false);
   }
 
+  function closeMemoryWindow() {
+    setMemoryOpen(false);
+  }
+
   async function loadProjects() {
     const data = await listProjects();
     if (data.length === 0) {
@@ -615,6 +640,42 @@ export default function App() {
       setSettingsMessage({ text: getErrorMessage(err, "Не удалось сохранить"), tone: "error" });
     } finally {
       setSavingKey(false);
+    }
+  }
+
+  async function refreshMemoryList(queryOverride?: string) {
+    const q = queryOverride ?? memoryQuery;
+    try {
+      setMemoryLoading(true);
+      setMemoryError(null);
+      const items = await listUserMemory(q);
+      setMemoryItems(items);
+    } catch (err: unknown) {
+      setMemoryError(getErrorMessage(err, "Не удалось загрузить память"));
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
+  async function handleDeleteMemory(memoryId: string) {
+    try {
+      await deleteUserMemory(memoryId);
+      await refreshMemoryList();
+    } catch (err: unknown) {
+      setMemoryError(getErrorMessage(err, "Не удалось удалить запись"));
+    }
+  }
+
+  async function handleTogglePin(memoryId: string, pinned: boolean) {
+    try {
+      if (pinned) {
+        await unpinUserMemory(memoryId);
+      } else {
+        await pinUserMemory(memoryId);
+      }
+      await refreshMemoryList();
+    } catch (err: unknown) {
+      setMemoryError(getErrorMessage(err, "Не удалось обновить запись"));
     }
   }
 
@@ -941,6 +1002,7 @@ export default function App() {
           onStop={handleCancelRun}
           stopEnabled={Boolean(run && !isDone)}
           onOpenSettings={() => setSettingsOpen(true)}
+          onOpenMemory={() => setMemoryOpen(true)}
           streamState={streamState}
         />
 
@@ -1005,6 +1067,22 @@ export default function App() {
               message={settingsMessage}
               onClose={closeSettingsWindow}
               onRefreshPermissions={async () => setPermissions(await checkPermissions())}
+            />
+          </div>
+        ) : null}
+
+        {memoryOpen ? (
+          <div className="settings-backdrop" onClick={closeMemoryWindow}>
+            <MemoryPanel
+              items={memoryItems}
+              query={memoryQuery}
+              loading={memoryLoading}
+              error={memoryError}
+              onQueryChange={setMemoryQuery}
+              onRefresh={() => refreshMemoryList()}
+              onDelete={handleDeleteMemory}
+              onTogglePin={handleTogglePin}
+              onClose={closeMemoryWindow}
             />
           </div>
         ) : null}

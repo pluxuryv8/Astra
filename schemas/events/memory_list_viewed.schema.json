@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/memory_list_viewed.schema.json",
+  "title": "memory_list_viewed",
+  "type": "object",
+  "properties": {
+    "query": {"type": "string"},
+    "result_count": {"type": "integer"}
+  },
+  "required": ["query", "result_count"],
+  "additionalProperties": false
+}

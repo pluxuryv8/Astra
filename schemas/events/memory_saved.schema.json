@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/memory_saved.schema.json",
+  "title": "memory_saved",
+  "type": "object",
+  "properties": {
+    "memory_id": {"type": "string"},
+    "title": {"type": "string"},
+    "len": {"type": "integer"},
+    "tags_count": {"type": "integer"}
+  },
+  "required": ["memory_id", "title", "len", "tags_count"],
+  "additionalProperties": false
+}

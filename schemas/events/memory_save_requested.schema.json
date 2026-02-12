@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/memory_save_requested.schema.json",
+  "title": "memory_save_requested",
+  "type": "object",
+  "properties": {
+    "from": {"type": "string"},
+    "preview_len": {"type": "integer"}
+  },
+  "required": ["from", "preview_len"],
+  "additionalProperties": false
+}

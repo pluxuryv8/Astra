@@ -115,6 +115,29 @@ def _needs_memory_commit(text: str) -> bool:
     return _contains_any(_normalize(text), MEMORY_TRIGGERS)
 
 
+def _extract_memory_payload(text: str) -> dict[str, Any]:
+    lowered = text.lower()
+    match_pos = None
+    match_token = None
+    for token in MEMORY_TRIGGERS:
+        pos = lowered.find(token)
+        if pos != -1 and (match_pos is None or pos < match_pos):
+            match_pos = pos
+            match_token = token
+    content = text
+    if match_pos is not None and match_token is not None:
+        content = text[match_pos + len(match_token) :]
+    content = re.sub(r"^[\\s:\\-—]+", "", content).strip()
+    if not content:
+        content = re.sub(r"\\b(" + "|".join(map(re.escape, MEMORY_TRIGGERS)) + r")\\b", "", text, flags=re.IGNORECASE).strip()
+    if not content:
+        content = text.strip()
+    title = content.splitlines()[0] if content else "Память пользователя"
+    if len(title) > 60:
+        title = title[:57] + "..."
+    return {"content": content, "title": title, "tags": []}
+
+
 def _step(
     index: int,
     title: str,
@@ -394,7 +417,18 @@ def _sanitize_plan_inputs(steps: list[PlanStep], fallback_goal: str) -> None:
                     cleaned[key] = value
             step.inputs = cleaned
         elif step.skill_name == "memory_save":
-            step.inputs = {}
+            raw = step.inputs or {}
+            content = raw.get("content") if isinstance(raw.get("content"), str) else ""
+            title = raw.get("title") if isinstance(raw.get("title"), str) else ""
+            tags = raw.get("tags") if isinstance(raw.get("tags"), list) else []
+            cleaned = {}
+            if content:
+                cleaned["content"] = content
+            if title:
+                cleaned["title"] = title
+            if tags:
+                cleaned["tags"] = tags
+            step.inputs = cleaned
         elif step.skill_name == "report":
             step.inputs = {}
 
@@ -525,6 +559,10 @@ def _llm_plan(text: str) -> list[PlanStep] | None:
 
 
 def _build_steps_from_text(text_norm: str, raw_text: str) -> list[PlanStep]:
+    if any(text_norm.startswith(trigger) for trigger in MEMORY_TRIGGERS):
+        steps: list[PlanStep] = []
+        return _append_memory_step_if_needed(raw_text, steps)
+
     plan = (
         _plan_playlist(text_norm)
         or _plan_sort_desktop(text_norm)
@@ -551,13 +589,14 @@ def _build_steps_from_text(text_norm: str, raw_text: str) -> list[PlanStep]:
 def _append_memory_step_if_needed(text: str, steps: list[PlanStep]) -> list[PlanStep]:
     if not _needs_memory_commit(text):
         return steps
+    payload = _extract_memory_payload(text)
     index = len(steps)
     steps.append(
         _step(
             index,
             "Сохранить в память",
             KIND_MEMORY_COMMIT,
-            {},
+            payload,
             "Запись сохранена в памяти",
             depends_on=[index - 1] if index > 0 else [],
             artifacts_expected=["memory"],

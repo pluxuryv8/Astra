@@ -7,6 +7,7 @@ type TopHoverBarProps = {
   isCompact: boolean;
   onStop: () => void;
   onOpenSettings: () => void;
+  onOpenMemory: () => void;
   stopEnabled: boolean;
   streamState?: "idle" | "live" | "reconnecting" | "polling";
 };
@@ -64,6 +65,9 @@ export default function TopHoverBar({
         </button>
         <button className={`hud-icon ${isCompact ? "active" : ""}`} onClick={onToggleCompact} title="Компактный вид">
           ⤡
+        </button>
+        <button className="hud-icon" onClick={onOpenMemory} title="Память">
+          MEM
         </button>
         <button className="hud-icon" onClick={onOpenSettings} title="Настройки">
           ⚙︎

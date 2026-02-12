@@ -159,6 +159,7 @@ _DANGER_PATTERNS = {
     "password": ("парол", "password", "passphrase"),
 }
 
+_MEMORY_TRIGGERS = ("запомни", "сохрани", "в память", "зафиксируй", "запиши")
 
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
@@ -199,6 +200,14 @@ class IntentRouter:
         tokens = _tokenize(text)
         short = len(tokens) <= 2
         ambiguous = short or _contains_any(text, _AMBIGUOUS_PHRASES)
+
+        if _contains_any(text, _MEMORY_TRIGGERS):
+            return IntentDecision(
+                intent=INTENT_ACT,
+                confidence=0.82,
+                reasons=["memory_trigger"],
+                act_hint=ActHint(target=TARGET_TEXT_ONLY, danger_flags=[], suggested_run_mode="execute_confirm"),
+            )
 
         has_action_verb = _contains_any(text, _ACTION_VERBS)
         has_action_object = _contains_any(text, _ACTION_OBJECT_HINTS)

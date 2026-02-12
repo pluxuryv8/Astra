@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/tauri";
 import type {
   Approval,
   MemorySearchResult,
+  UserMemory,
   PlanStep,
   Project,
   ProjectSettings,
@@ -145,6 +146,36 @@ export function getSnapshot(runId: string): Promise<Snapshot> {
 
 export function searchMemory(projectId: string, q: string): Promise<MemorySearchResult[]> {
   return api<MemorySearchResult[]>(`/projects/${projectId}/memory/search?q=${encodeURIComponent(q)}`);
+}
+
+export function listUserMemory(query = "", tag = "", limit = 50): Promise<UserMemory[]> {
+  const params = new URLSearchParams();
+  if (query) params.set("query", query);
+  if (tag) params.set("tag", tag);
+  params.set("limit", String(limit));
+  return api<UserMemory[]>(`/memory/list?${params.toString()}`);
+}
+
+export function createUserMemory(payload: {
+  title?: string | null;
+  content: string;
+  tags?: string[] | null;
+  source?: string | null;
+  from?: string | null;
+}): Promise<UserMemory> {
+  return api<UserMemory>("/memory/create", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function deleteUserMemory(memoryId: string): Promise<StatusResponse> {
+  return api<StatusResponse>(`/memory/${memoryId}`, { method: "DELETE" });
+}
+
+export function pinUserMemory(memoryId: string): Promise<UserMemory> {
+  return api<UserMemory>(`/memory/${memoryId}/pin`, { method: "POST" });
+}
+
+export function unpinUserMemory(memoryId: string): Promise<UserMemory> {
+  return api<UserMemory>(`/memory/${memoryId}/unpin`, { method: "POST" });
 }
 
 export function listApprovals(runId: string): Promise<Approval[]> {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 import uuid
@@ -53,6 +54,17 @@ def _json_load(value: Optional[str]) -> Any:
 
 def _uuid() -> str:
     return str(uuid.uuid4())
+
+
+def _memory_content_limit() -> int:
+    raw = os.getenv("ASTRA_MEMORY_MAX_CHARS", "4000")
+    try:
+        limit = int(raw)
+    except ValueError:
+        limit = 4000
+    if limit <= 0:
+        return 4000
+    return limit
 
 
 def _infer_plan_step_kind(skill_name: str | None) -> str:
@@ -900,6 +912,153 @@ def search_memory(project_id: str, query: str, item_type: Optional[str] = None, 
                 continue
         filtered.append(result)
     return filtered[:limit]
+
+
+def create_user_memory(title: Optional[str], content: str, tags: Optional[list[str]] = None, source: str = "user_command") -> dict:
+    if not isinstance(content, str) or not content.strip():
+        raise ValueError("content_required")
+    limit = _memory_content_limit()
+    if len(content) > limit:
+        raise ValueError(f"content_too_long:{limit}")
+
+    title_text = (title or "").strip()
+    if not title_text:
+        title_text = content.strip().splitlines()[0] if content.strip() else "Память пользователя"
+    if len(title_text) > 120:
+        title_text = title_text[:117] + "..."
+
+    tags = tags or []
+    created_at = now_iso()
+    updated_at = created_at
+    memory_id = _uuid()
+
+    conn = _conn_or_raise()
+    with _lock:
+        conn.execute(
+            """
+            INSERT INTO user_memories (id, created_at, updated_at, title, content, tags, source, is_deleted, pinned, last_used_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                memory_id,
+                created_at,
+                updated_at,
+                title_text,
+                content,
+                _json_dump(tags),
+                source,
+                0,
+                0,
+                None,
+            ),
+        )
+        conn.commit()
+    return {
+        "id": memory_id,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "title": title_text,
+        "content": content,
+        "tags": tags,
+        "source": source,
+        "is_deleted": False,
+        "pinned": False,
+        "last_used_at": None,
+    }
+
+
+def list_user_memories(query: str | None = None, tag: str | None = None, limit: int = 50, include_deleted: bool = False) -> list[dict]:
+    conn = _conn_or_raise()
+    query = (query or "").strip()
+    tag = (tag or "").strip()
+    params: list[Any] = []
+    clauses: list[str] = []
+    if not include_deleted:
+        clauses.append("is_deleted = 0")
+    if query:
+        clauses.append("(title LIKE ? OR content LIKE ?)")
+        like = f"%{query}%"
+        params.extend([like, like])
+    if tag:
+        clauses.append("tags LIKE ?")
+        params.append(f"%{tag}%")
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    limit = max(1, min(limit, 200))
+
+    rows = conn.execute(
+        f"""
+        SELECT * FROM user_memories
+        {where}
+        ORDER BY pinned DESC, updated_at DESC
+        LIMIT ?
+        """,
+        (*params, limit),
+    ).fetchall()
+
+    return [
+        {
+            "id": r["id"],
+            "created_at": r["created_at"],
+            "updated_at": r["updated_at"],
+            "title": r["title"],
+            "content": r["content"],
+            "tags": _json_load(r["tags"]) or [],
+            "source": r["source"],
+            "is_deleted": bool(r["is_deleted"]),
+            "pinned": bool(r["pinned"]),
+            "last_used_at": r["last_used_at"],
+        }
+        for r in rows
+    ]
+
+
+def get_user_memory(memory_id: str) -> Optional[dict]:
+    conn = _conn_or_raise()
+    row = conn.execute("SELECT * FROM user_memories WHERE id = ?", (memory_id,)).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "title": row["title"],
+        "content": row["content"],
+        "tags": _json_load(row["tags"]) or [],
+        "source": row["source"],
+        "is_deleted": bool(row["is_deleted"]),
+        "pinned": bool(row["pinned"]),
+        "last_used_at": row["last_used_at"],
+    }
+
+
+def delete_user_memory(memory_id: str) -> Optional[dict]:
+    memory = get_user_memory(memory_id)
+    if not memory:
+        return None
+    conn = _conn_or_raise()
+    with _lock:
+        conn.execute(
+            "UPDATE user_memories SET is_deleted = 1, updated_at = ? WHERE id = ?",
+            (now_iso(), memory_id),
+        )
+        conn.commit()
+    memory["is_deleted"] = True
+    return memory
+
+
+def set_user_memory_pinned(memory_id: str, pinned: bool) -> Optional[dict]:
+    memory = get_user_memory(memory_id)
+    if not memory:
+        return None
+    conn = _conn_or_raise()
+    with _lock:
+        conn.execute(
+            "UPDATE user_memories SET pinned = ?, updated_at = ? WHERE id = ?",
+            (1 if pinned else 0, now_iso(), memory_id),
+        )
+        conn.commit()
+    memory["pinned"] = pinned
+    return memory
 
 
 def insert_event(event: dict) -> dict:

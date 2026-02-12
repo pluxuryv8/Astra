@@ -3,6 +3,11 @@
   "$id": "schemas/skills/memory_save.inputs.schema.json",
   "title": "MemorySaveInputs",
   "type": "object",
-  "properties": {},
+  "properties": {
+    "title": { "type": "string" },
+    "content": { "type": "string" },
+    "tags": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["content"],
   "additionalProperties": false
 }

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class ProjectCreate(BaseModel):
@@ -35,3 +35,13 @@ class ApprovalDecision(BaseModel):
 
 class ApprovalDecisionRequest(BaseModel):
     decision: Optional[ApprovalDecision] = None
+
+
+class MemoryCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    title: Optional[str] = None
+    content: str
+    tags: list[str] = Field(default_factory=list)
+    source: Optional[str] = None
+    from_: Optional[str] = Field(default="user_command", alias="from")
+    run_id: Optional[str] = None
