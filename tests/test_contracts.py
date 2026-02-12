@@ -31,6 +31,10 @@ def bootstrap(client: TestClient, token: str = "test-token") -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def unwrap_run(payload: dict) -> dict:
+    return payload.get("run") or payload
+
+
 def load_schema(schema_name: str):
     schema_path = ROOT / "schemas" / schema_name
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
@@ -87,6 +91,7 @@ def test_snapshot_contract():
         json={"query_text": "contract snapshot", "mode": "plan_only"},
         headers=headers,
     ).json()
+    run = unwrap_run(run)
 
     client.post(f"/api/v1/runs/{run['id']}/plan", headers=headers)
 
@@ -111,6 +116,7 @@ def test_event_contract_from_sse():
         json={"query_text": "contract events", "mode": "plan_only"},
         headers=headers,
     ).json()
+    run = unwrap_run(run)
 
     res = client.get(f"/api/v1/runs/{run['id']}/events?token=test-token&once=1")
     assert res.status_code == 200
@@ -132,9 +138,10 @@ def test_approval_resolved_event():
     project = client.post("/api/v1/projects", json={"name": "Approvals", "tags": [], "settings": {}}, headers=headers).json()
     run = client.post(
         f"/api/v1/projects/{project['id']}/runs",
-        json={"query_text": "shell", "mode": "execute_confirm"},
+        json={"query_text": "Выполни shell команду", "mode": "execute_confirm"},
         headers=headers,
     ).json()
+    run = unwrap_run(run)
 
     plan_steps = [
         {

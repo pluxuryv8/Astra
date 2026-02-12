@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/step_planned.schema.json",
+  "title": "step_planned",
+  "type": "object",
+  "properties": {
+    "step_id": {"type": "string"},
+    "kind": {"type": "string"},
+    "title": {"type": "string"},
+    "success_criteria": {"type": "string"},
+    "requires_approval": {"type": "boolean"}
+  },
+  "required": ["step_id", "kind", "title", "success_criteria", "requires_approval"],
+  "additionalProperties": true
+}

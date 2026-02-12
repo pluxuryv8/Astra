@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/clarify_requested.schema.json",
+  "title": "clarify_requested",
+  "type": "object",
+  "properties": {
+    "questions": {"type": "array", "items": {"type": "string"}}
+  },
+  "required": ["questions"],
+  "additionalProperties": true
+}

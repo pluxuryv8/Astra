@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/observation_captured.schema.json",
+  "title": "observation_captured",
+  "type": "object",
+  "properties": {
+    "step_id": {"type": "string"},
+    "phase": {"type": "string"},
+    "hash": {"type": "string"},
+    "changed": {"type": "boolean"},
+    "width": {"type": ["integer", "null"]},
+    "height": {"type": ["integer", "null"]}
+  },
+  "required": ["step_id", "phase", "hash", "changed"],
+  "additionalProperties": false
+}

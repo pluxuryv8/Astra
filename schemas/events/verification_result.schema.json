@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/verification_result.schema.json",
+  "title": "verification_result",
+  "type": "object",
+  "properties": {
+    "result": {"type": "string"},
+    "details": {"type": ["object", "null"]}
+  },
+  "required": ["result"],
+  "additionalProperties": false
+}

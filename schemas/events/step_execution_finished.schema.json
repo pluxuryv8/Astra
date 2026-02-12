@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/step_execution_finished.schema.json",
+  "title": "step_execution_finished",
+  "type": "object",
+  "properties": {
+    "status": {"type": "string"},
+    "reason": {"type": "string"},
+    "micro_steps": {"type": "integer"}
+  },
+  "required": ["status", "reason", "micro_steps"],
+  "additionalProperties": false
+}

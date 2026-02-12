@@ -7,6 +7,7 @@ import type {
   Project,
   ProjectSettings,
   Run,
+  RunIntentResponse,
   Snapshot,
   StatusResponse
 } from "./types";
@@ -114,8 +115,8 @@ export function createProject(payload: { name: string; tags: string[]; settings:
 export function createRun(
   projectId: string,
   payload: { query_text: string; mode: string; parent_run_id?: string | null; purpose?: string | null }
-): Promise<Run> {
-  return api<Run>(`/projects/${projectId}/runs`, { method: "POST", body: JSON.stringify(payload) });
+): Promise<RunIntentResponse> {
+  return api<RunIntentResponse>(`/projects/${projectId}/runs`, { method: "POST", body: JSON.stringify(payload) });
 }
 
 export function createPlan(runId: string): Promise<PlanStep[]> {

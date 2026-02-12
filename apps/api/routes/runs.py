@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import json
 import threading
+from types import SimpleNamespace
 
 from fastapi import APIRouter, HTTPException, Request, Depends
 from fastapi.responses import Response
 
 from apps.api.auth import require_auth
 from apps.api.models import RunCreate, ApprovalDecisionRequest
+from core.brain.router import get_brain
+from core.brain.types import LLMRequest
 from core.event_bus import emit
+from core.intent_router import INTENT_ACT, INTENT_ASK, INTENT_CHAT, IntentRouter
+from core.llm_routing import ContextItem
 from memory import store
 
 router = APIRouter(prefix="/api/v1", tags=["runs"], dependencies=[Depends(require_auth)])
@@ -74,7 +79,7 @@ def _build_snapshot(run_id: str) -> dict:
 
 
 @router.post("/projects/{project_id}/runs")
-def create_run(project_id: str, payload: RunCreate):
+def create_run(project_id: str, payload: RunCreate, request: Request):
     project = store.get_project(project_id)
     if not project:
         raise HTTPException(status_code=404, detail="Проект не найден")
@@ -84,14 +89,126 @@ def create_run(project_id: str, payload: RunCreate):
     if payload.mode not in allowed_modes:
         raise HTTPException(status_code=400, detail="Недопустимый режим запуска")
 
-    run = store.create_run(project_id, payload.query_text, payload.mode, payload.parent_run_id, payload.purpose)
-    emit(
-        run["id"],
-        "run_created",
-        "Запуск создан",
-        {"project_id": project_id, "mode": payload.mode, "query_text": payload.query_text},
-    )
-    return run
+    router = IntentRouter()
+    decision = router.decide(payload.query_text)
+
+    meta = {
+        "intent": decision.intent,
+        "intent_confidence": decision.confidence,
+        "intent_reasons": decision.reasons,
+        "intent_questions": decision.questions,
+        "act_hint": decision.act_hint.to_dict() if decision.act_hint else None,
+        "danger_flags": decision.act_hint.danger_flags if decision.act_hint else [],
+        "suggested_run_mode": decision.act_hint.suggested_run_mode if decision.act_hint else None,
+        "target": decision.act_hint.target if decision.act_hint else None,
+    }
+
+    if decision.intent == INTENT_ACT:
+        mode = payload.mode
+        suggested_mode = decision.act_hint.suggested_run_mode if decision.act_hint else None
+        if suggested_mode == "execute_confirm" and mode != "execute_confirm":
+            mode = "execute_confirm"
+        if mode not in allowed_modes:
+            mode = payload.mode
+        run = store.create_run(project_id, payload.query_text, mode, payload.parent_run_id, payload.purpose, meta=meta)
+        emit(
+            run["id"],
+            "run_created",
+            "Запуск создан",
+            {"project_id": project_id, "mode": mode, "query_text": payload.query_text},
+        )
+        emit(
+            run["id"],
+            "intent_decided",
+            "Intent decided",
+            {
+                "intent": decision.intent,
+                "confidence": decision.confidence,
+                "reasons": decision.reasons,
+                "danger_flags": decision.act_hint.danger_flags if decision.act_hint else [],
+                "suggested_mode": suggested_mode,
+                "selected_mode": mode,
+                "target": decision.act_hint.target if decision.act_hint else None,
+            },
+        )
+        engine = _get_engine(request)
+        plan_steps = engine.create_plan(run)
+        return {"kind": "act", "intent": decision.to_dict(), "run": run, "plan": plan_steps}
+
+    if decision.intent == INTENT_CHAT:
+        run = store.create_run(project_id, payload.query_text, "plan_only", payload.parent_run_id, payload.purpose or "chat_only", meta=meta)
+        emit(
+            run["id"],
+            "run_created",
+            "Запуск создан",
+            {"project_id": project_id, "mode": run["mode"], "query_text": payload.query_text},
+        )
+        emit(
+            run["id"],
+            "intent_decided",
+            "Intent decided",
+            {
+                "intent": decision.intent,
+                "confidence": decision.confidence,
+                "reasons": decision.reasons,
+                "danger_flags": [],
+                "suggested_mode": run["mode"],
+                "target": None,
+            },
+        )
+        brain = get_brain()
+        ctx = SimpleNamespace(run=run, task={}, plan_step={}, settings=project.get("settings") or {})
+        request = LLMRequest(
+            purpose="chat_response",
+            task_kind="chat",
+            messages=[
+                {"role": "system", "content": "Ты ассистент Astra. Отвечай коротко и по делу."},
+                {"role": "user", "content": payload.query_text},
+            ],
+            context_items=[ContextItem(content=payload.query_text, source_type="user_prompt", sensitivity="personal")],
+            run_id=run["id"],
+        )
+        response = brain.call(request, ctx)
+        if response.status != "ok":
+            raise HTTPException(status_code=502, detail="Не удалось получить ответ LLM")
+        emit(
+            run["id"],
+            "chat_response_generated",
+            "Chat response generated",
+            {"provider": response.provider, "model_id": response.model_id, "latency_ms": response.latency_ms},
+        )
+        return {"kind": "chat", "intent": decision.to_dict(), "run": run, "chat_response": response.text}
+
+    if decision.intent == INTENT_ASK:
+        run = store.create_run(project_id, payload.query_text, "plan_only", payload.parent_run_id, payload.purpose or "clarify", meta=meta)
+        emit(
+            run["id"],
+            "run_created",
+            "Запуск создан",
+            {"project_id": project_id, "mode": run["mode"], "query_text": payload.query_text},
+        )
+        emit(
+            run["id"],
+            "intent_decided",
+            "Intent decided",
+            {
+                "intent": decision.intent,
+                "confidence": decision.confidence,
+                "reasons": decision.reasons,
+                "danger_flags": [],
+                "suggested_mode": run["mode"],
+                "target": None,
+            },
+        )
+        emit(
+            run["id"],
+            "clarify_requested",
+            "Clarification requested",
+            {"questions": decision.questions},
+        )
+        return {"kind": "clarify", "intent": decision.to_dict(), "run": run, "questions": decision.questions}
+
+    raise HTTPException(status_code=500, detail="Intent routing failed")
 
 
 @router.post("/runs/{run_id}/plan")
@@ -101,7 +218,7 @@ def create_plan(run_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Запуск не найден")
 
     engine = _get_engine(request)
-    steps = engine.create_plan(run_id, run.get("query_text", ""))
+    steps = engine.create_plan(run)
     return steps
 
 

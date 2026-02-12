@@ -21,6 +21,7 @@ _DEFAULT_EVENT_TYPES = {
     "task_failed",
     "task_retried",
     "task_done",
+    "step_planned",
     "source_found",
     "source_fetched",
     "fact_extracted",
@@ -39,6 +40,9 @@ _DEFAULT_EVENT_TYPES = {
     "llm_budget_exceeded",
     "autopilot_state",
     "autopilot_action",
+    "intent_decided",
+    "clarify_requested",
+    "chat_response_generated",
 }
 
 

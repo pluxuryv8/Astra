@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/micro_action_executed.schema.json",
+  "title": "micro_action_executed",
+  "type": "object",
+  "properties": {
+    "action_type": {"type": ["string", "null"]},
+    "ok": {"type": "boolean"}
+  },
+  "required": ["action_type", "ok"],
+  "additionalProperties": false
+}

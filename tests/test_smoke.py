@@ -30,6 +30,10 @@ def bootstrap(client: TestClient, token: str = "test-token") -> dict:
     return {"Authorization": f"Bearer {token}"}
 
 
+def unwrap_run(payload: dict) -> dict:
+    return payload.get("run") or payload
+
+
 def wait_for_run_done(client: TestClient, run_id: str, headers: dict, timeout: float = 10.0):
     start = time.time()
     while time.time() - start < timeout:
@@ -85,9 +89,10 @@ def test_smoke_flow():
     project = client.post("/api/v1/projects", json={"name": "Проверка", "tags": [], "settings": {}}, headers=headers).json()
     run = client.post(
         f"/api/v1/projects/{project['id']}/runs",
-        json={"query_text": "Проверь https://example.com", "mode": "research"},
+        json={"query_text": "Проверь сайт https://example.com в браузере", "mode": "research"},
         headers=headers,
     ).json()
+    run = unwrap_run(run)
 
     # вручную задаём план для smoke-теста, чтобы не зависеть от автопилота
     plan_steps = [
@@ -162,6 +167,7 @@ def test_conflict_scan_produces_conflicts():
         json={"query_text": "конфликт", "mode": "research"},
         headers=headers,
     ).json()
+    run = unwrap_run(run)
 
     # вставляем конфликтующие факты
     store.insert_facts(run["id"], [
@@ -186,9 +192,10 @@ def test_approval_flow_shell_skill_with_retry():
     project = client.post("/api/v1/projects", json={"name": "Подтверждение", "tags": [], "settings": {}}, headers=headers).json()
     run = client.post(
         f"/api/v1/projects/{project['id']}/runs",
-        json={"query_text": "shell", "mode": "execute_confirm"},
+        json={"query_text": "Выполни shell команду", "mode": "execute_confirm"},
         headers=headers,
     ).json()
+    run = unwrap_run(run)
 
     # план с навыком shell
     plan_steps = [

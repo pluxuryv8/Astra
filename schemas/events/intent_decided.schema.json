@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/intent_decided.schema.json",
+  "title": "intent_decided",
+  "type": "object",
+  "properties": {
+    "intent": {"type": "string", "enum": ["CHAT", "ACT", "ASK_CLARIFY"]},
+    "confidence": {"type": "number"},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "danger_flags": {"type": "array", "items": {"type": "string"}},
+    "suggested_mode": {"type": ["string", "null"]},
+    "target": {"type": ["string", "null"]}
+  },
+  "required": ["intent", "confidence", "reasons"],
+  "additionalProperties": true
+}

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/micro_action_proposed.schema.json",
+  "title": "micro_action_proposed",
+  "type": "object",
+  "properties": {
+    "action_type": {"type": ["string", "null"]},
+    "action_summary": {"type": ["string", "null"]},
+    "provider": {"type": ["string", "null"]},
+    "reason": {"type": ["string", "null"]}
+  },
+  "required": ["action_type"],
+  "additionalProperties": false
+}

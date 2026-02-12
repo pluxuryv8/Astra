@@ -34,6 +34,30 @@ export type Run = {
   finished_at?: string | null;
   parent_run_id?: string | null;
   purpose?: string | null;
+  meta?: Record<string, unknown>;
+};
+
+export type ActHint = {
+  target: "COMPUTER" | "TEXT_ONLY";
+  danger_flags: string[];
+  suggested_run_mode: string;
+};
+
+export type IntentDecision = {
+  intent: "CHAT" | "ACT" | "ASK_CLARIFY";
+  confidence: number;
+  reasons: string[];
+  questions?: string[];
+  act_hint?: ActHint | null;
+};
+
+export type RunIntentResponse = {
+  kind: "act" | "chat" | "clarify";
+  intent: IntentDecision;
+  run?: Run | null;
+  questions?: string[];
+  chat_response?: string | null;
+  plan?: PlanStep[];
 };
 
 export type PlanStep = {
@@ -41,9 +65,14 @@ export type PlanStep = {
   run_id?: string;
   step_index?: number;
   title: string;
+  kind?: string;
   status?: string;
   skill_name?: string;
   inputs?: Record<string, unknown>;
+  success_criteria?: string;
+  danger_flags?: string[];
+  requires_approval?: boolean;
+  artifacts_expected?: string[];
   depends_on?: string[];
 };
 

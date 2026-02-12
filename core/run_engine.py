@@ -5,6 +5,7 @@ from pathlib import Path
 
 from core import planner
 from core.event_bus import emit
+from core.executor.computer_executor import COMPUTER_STEP_KINDS, ComputerExecutor
 from core.skills.registry import SkillRegistry
 from core.skills.runner import SkillRunner
 from core.skills.result_types import SkillResult
@@ -18,11 +19,33 @@ class RunEngine:
         self.registry = SkillRegistry(base_dir / "skills")
         self.registry.load()
         self.runner = SkillRunner(self.registry, base_dir)
+        self.computer_executor = ComputerExecutor(base_dir)
 
-    def create_plan(self, run_id: str, query_text: str) -> list[dict]:
-        steps = planner.create_plan_for_query(query_text)
+    def create_plan(self, run: dict) -> list[dict]:
+        run_id = run["id"]
+        existing = store.list_plan_steps(run_id)
+        if existing:
+            return existing
+
+        steps = planner.create_plan_for_run(run)
         store.insert_plan_steps(run_id, steps)
-        emit(run_id, "plan_created", "План создан", {"steps_count": len(steps)})
+
+        step_kinds = [s.get("kind") for s in steps]
+        has_danger = any(s.get("requires_approval") for s in steps)
+        emit(run_id, "plan_created", "План создан", {"steps_count": len(steps), "step_kinds": step_kinds, "has_danger": has_danger})
+        for step in steps:
+            emit(
+                run_id,
+                "step_planned",
+                "Шаг запланирован",
+                {
+                    "step_id": step.get("id"),
+                    "kind": step.get("kind"),
+                    "title": step.get("title"),
+                    "success_criteria": step.get("success_criteria"),
+                    "requires_approval": step.get("requires_approval"),
+                },
+            )
         return steps
 
     def start_run(self, run_id: str) -> None:
@@ -193,6 +216,41 @@ class RunEngine:
         if not manifest:
             raise RuntimeError(f"Навык не найден: {step['skill_name']}")
 
+        if self._should_use_computer_executor(step):
+            result = self.computer_executor.execute_step(run, step, task)
+            if result.status == "done":
+                store.update_task_status(task["id"], "done", finished_at=now_iso())
+                store.update_plan_step_status(step["id"], "done")
+                emit(
+                    run_id,
+                    "task_done",
+                    "Задача завершена",
+                    {
+                        "task_id": task["id"],
+                        "step_id": step["id"],
+                        "finished_at": now_iso(),
+                    },
+                    task_id=task["id"],
+                    step_id=step["id"],
+                )
+                return task
+
+            store.update_task_status(task["id"], "failed", finished_at=now_iso(), error=result.reason)
+            store.update_plan_step_status(step["id"], "failed")
+            emit(
+                run_id,
+                "task_failed",
+                "Задача завершилась с ошибкой",
+                {
+                    "task_id": task["id"],
+                    "step_id": step["id"],
+                    "error": result.reason,
+                },
+                task_id=task["id"],
+                step_id=step["id"],
+            )
+            return task
+
         if manifest.scopes in ("confirm_required", "dangerous") and run["mode"] != "execute_confirm":
             store.update_task_status(task["id"], "failed", finished_at=now_iso(), error="требуется_подтверждение")
             store.update_plan_step_status(step["id"], "failed")
@@ -247,6 +305,11 @@ class RunEngine:
         )
 
         return task
+
+    def _should_use_computer_executor(self, step: dict) -> bool:
+        if step.get("skill_name") != "autopilot_computer":
+            return False
+        return step.get("kind") in COMPUTER_STEP_KINDS
 
     def _persist_skill_result(self, run_id: str, step: dict, task: dict, result: SkillResult) -> None:
         sources_payload = []

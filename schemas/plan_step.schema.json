@@ -8,11 +8,42 @@
     "run_id": {"type": "string"},
     "step_index": {"type": "integer"},
     "title": {"type": "string"},
+    "kind": {
+      "type": "string",
+      "enum": [
+        "CHAT_RESPONSE",
+        "CLARIFY_QUESTION",
+        "BROWSER_RESEARCH_UI",
+        "COMPUTER_ACTIONS",
+        "DOCUMENT_WRITE",
+        "FILE_ORGANIZE",
+        "CODE_ASSIST",
+        "MEMORY_COMMIT"
+      ]
+    },
     "skill_name": {"type": "string"},
     "inputs": {"type": "object"},
+    "success_criteria": {"type": "string"},
+    "danger_flags": {"type": "array", "items": {"type": "string"}},
+    "requires_approval": {"type": "boolean"},
+    "artifacts_expected": {"type": "array", "items": {"type": "string"}},
     "depends_on": {"type": "array", "items": {"type": "integer"}},
     "status": {"type": "string", "enum": ["created", "running", "done", "failed", "canceled"]}
   },
-  "required": ["id", "run_id", "step_index", "title", "skill_name", "inputs", "depends_on", "status"],
+  "required": [
+    "id",
+    "run_id",
+    "step_index",
+    "title",
+    "kind",
+    "skill_name",
+    "inputs",
+    "success_criteria",
+    "danger_flags",
+    "requires_approval",
+    "artifacts_expected",
+    "depends_on",
+    "status"
+  ],
   "additionalProperties": false
 }

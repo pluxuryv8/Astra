@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/step_waiting.schema.json",
+  "title": "step_waiting",
+  "type": "object",
+  "properties": {
+    "reason": {"type": "string"},
+    "waited_ms": {"type": "integer"}
+  },
+  "required": ["reason", "waited_ms"],
+  "additionalProperties": false
+}

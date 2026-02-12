@@ -55,6 +55,20 @@ def _uuid() -> str:
     return str(uuid.uuid4())
 
 
+def _infer_plan_step_kind(skill_name: str | None) -> str:
+    if skill_name == "memory_save":
+        return "MEMORY_COMMIT"
+    if skill_name == "autopilot_computer":
+        return "COMPUTER_ACTIONS"
+    if skill_name == "web_research":
+        return "BROWSER_RESEARCH_UI"
+    if skill_name == "report":
+        return "DOCUMENT_WRITE"
+    if skill_name == "extract_facts":
+        return "CODE_ASSIST"
+    return "COMPUTER_ACTIONS"
+
+
 def _insert_fts(project_id: str, run_id: str, item_type: str, item_id: str, content: str, created_at: str, tags: Optional[str] = None) -> None:
     conn = _conn_or_raise()
     try:
@@ -152,14 +166,22 @@ def update_project(project_id: str, name: str | None, tags: list[str] | None, se
     }
 
 
-def create_run(project_id: str, query_text: str, mode: str, parent_run_id: Optional[str] = None, purpose: Optional[str] = None) -> dict:
+def create_run(
+    project_id: str,
+    query_text: str,
+    mode: str,
+    parent_run_id: Optional[str] = None,
+    purpose: Optional[str] = None,
+    meta: Optional[dict] = None,
+) -> dict:
     run_id = _uuid()
     created_at = now_iso()
+    meta_json = _json_dump(meta) if meta is not None else None
     conn = _conn_or_raise()
     with _lock:
         conn.execute(
-            "INSERT INTO runs (id, project_id, query_text, mode, status, created_at, parent_run_id, purpose) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (run_id, project_id, query_text, mode, "created", created_at, parent_run_id, purpose),
+            "INSERT INTO runs (id, project_id, query_text, mode, status, created_at, parent_run_id, purpose, meta) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (run_id, project_id, query_text, mode, "created", created_at, parent_run_id, purpose, meta_json),
         )
         conn.commit()
     return {
@@ -169,6 +191,7 @@ def create_run(project_id: str, query_text: str, mode: str, parent_run_id: Optio
         "mode": mode,
         "parent_run_id": parent_run_id,
         "purpose": purpose,
+        "meta": meta or {},
         "status": "created",
         "created_at": created_at,
         "started_at": None,
@@ -188,6 +211,7 @@ def get_run(run_id: str) -> Optional[dict]:
         "mode": row["mode"],
         "parent_run_id": row["parent_run_id"],
         "purpose": row["purpose"],
+        "meta": _json_load(row["meta"]) or {},
         "status": row["status"],
         "created_at": row["created_at"],
         "started_at": row["started_at"],
@@ -208,9 +232,11 @@ def update_run_status(run_id: str, status: str, started_at: Optional[str] = None
 def insert_plan_steps(run_id: str, steps: list[dict]) -> list[dict]:
     conn = _conn_or_raise()
     with _lock:
+        conn.execute("DELETE FROM plan_steps WHERE run_id = ?", (run_id,))
         for step in steps:
+            kind = step.get("kind") or _infer_plan_step_kind(step.get("skill_name"))
             conn.execute(
-                "INSERT INTO plan_steps (id, run_id, step_index, title, skill_name, inputs, depends_on, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO plan_steps (id, run_id, step_index, title, skill_name, inputs, depends_on, status, kind, success_criteria, danger_flags, requires_approval, artifacts_expected) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     step["id"],
                     run_id,
@@ -220,6 +246,11 @@ def insert_plan_steps(run_id: str, steps: list[dict]) -> list[dict]:
                     _json_dump(step.get("inputs") or {}),
                     _json_dump(step.get("depends_on") or []),
                     step.get("status", "created"),
+                    kind,
+                    _json_dump(step.get("success_criteria") or ""),
+                    _json_dump(step.get("danger_flags") or []),
+                    1 if step.get("requires_approval") else 0,
+                    _json_dump(step.get("artifacts_expected") or []),
                 ),
             )
         conn.commit()
@@ -242,6 +273,11 @@ def list_plan_steps(run_id: str) -> list[dict]:
             "inputs": _json_load(r["inputs"]) or {},
             "depends_on": _json_load(r["depends_on"]) or [],
             "status": r["status"],
+            "kind": r["kind"] or _infer_plan_step_kind(r["skill_name"]),
+            "success_criteria": _json_load(r["success_criteria"]) or "",
+            "danger_flags": _json_load(r["danger_flags"]) or [],
+            "requires_approval": bool(r["requires_approval"]) if r["requires_approval"] is not None else False,
+            "artifacts_expected": _json_load(r["artifacts_expected"]) or [],
         }
         for r in rows
     ]
@@ -261,6 +297,11 @@ def get_plan_step(step_id: str) -> Optional[dict]:
         "inputs": _json_load(row["inputs"]) or {},
         "depends_on": _json_load(row["depends_on"]) or [],
         "status": row["status"],
+        "kind": row["kind"] or _infer_plan_step_kind(row["skill_name"]),
+        "success_criteria": _json_load(row["success_criteria"]) or "",
+        "danger_flags": _json_load(row["danger_flags"]) or [],
+        "requires_approval": bool(row["requires_approval"]) if row["requires_approval"] is not None else False,
+        "artifacts_expected": _json_load(row["artifacts_expected"]) or [],
     }
 
 

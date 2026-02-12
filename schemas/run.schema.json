@@ -10,6 +10,7 @@
     "mode": {"type": "string", "enum": ["plan_only", "research", "execute_confirm", "autopilot_safe"]},
     "parent_run_id": {"type": ["string", "null"]},
     "purpose": {"type": ["string", "null"]},
+    "meta": {"type": ["object", "null"]},
     "status": {"type": "string", "enum": ["created", "planning", "running", "paused", "done", "failed", "canceled"]},
     "created_at": {"type": "string"},
     "started_at": {"type": ["string", "null"]},

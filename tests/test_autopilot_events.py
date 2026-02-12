@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from core.run_engine import RunEngine
+from core.executor.computer_executor import ExecutorConfig
 from memory import store
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -16,14 +17,7 @@ class StubBrain:
     def call(self, request, ctx):
         from core.brain.types import LLMResponse
         payload = {
-            "goal": "Тест автопилота",
-            "plan": [],
-            "step_summary": "ожидание",
-            "reason": "",
-            "actions": [{"type": "wait", "ms": 1}],
-            "needs_user": False,
-            "ask_confirm": {"required": False, "reason": "", "proposed_effect": ""},
-            "done": False,
+            "action_type": "done",
         }
         return LLMResponse(
             text=json.dumps(payload, ensure_ascii=False),
@@ -61,13 +55,12 @@ def _prepare_engine(tmp_path: Path):
 def test_autopilot_events_persist(monkeypatch, tmp_path):
     engine = _prepare_engine(tmp_path)
 
-    # stub Brain
+    # stub Brain + bridge for executor
     import core.brain
     monkeypatch.setattr(core.brain, "get_brain", lambda: StubBrain())
-
-    # stub bridge on the existing skill instance
-    from skills.autopilot_computer.skill import skill as autopilot_skill
-    autopilot_skill.bridge = StubBridge()
+    engine.computer_executor.bridge = StubBridge()
+    engine.computer_executor.brain = StubBrain()
+    engine.computer_executor.config = ExecutorConfig(max_micro_steps=1, wait_timeout_ms=0, wait_poll_ms=0, wait_after_act_ms=0)
 
     project = store.create_project(
         "autopilot",
@@ -79,11 +72,11 @@ def test_autopilot_events_persist(monkeypatch, tmp_path):
     )
     run = store.create_run(project["id"], "Покажи состояние", "execute_confirm")
 
-    engine.create_plan(run["id"], run.get("query_text", ""))
+    engine.create_plan(run)
     engine.start_run(run["id"])
 
     events = store.list_events(run["id"], limit=500)
     event_types = {e["type"] for e in events}
 
-    assert "autopilot_state" in event_types
-    assert "autopilot_action" in event_types
+    assert "step_execution_started" in event_types
+    assert "step_execution_finished" in event_types

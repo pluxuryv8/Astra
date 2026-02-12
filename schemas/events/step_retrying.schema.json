@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/step_retrying.schema.json",
+  "title": "step_retrying",
+  "type": "object",
+  "properties": {
+    "attempt": {"type": "integer"},
+    "reason": {"type": "string"}
+  },
+  "required": ["attempt", "reason"],
+  "additionalProperties": false
+}

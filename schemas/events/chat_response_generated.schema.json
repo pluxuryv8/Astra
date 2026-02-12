@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/chat_response_generated.schema.json",
+  "title": "chat_response_generated",
+  "type": "object",
+  "properties": {
+    "provider": {"type": "string"},
+    "model_id": {"type": ["string", "null"]},
+    "latency_ms": {"type": "integer"}
+  },
+  "required": ["provider", "latency_ms"],
+  "additionalProperties": true
+}

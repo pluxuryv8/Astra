@@ -618,24 +618,37 @@ export default function App() {
 
   async function handleRunCommand() {
     if (!selectedProject || !queryText.trim()) return;
-    const ok = await ensureApiKey();
-    if (!ok) return;
     try {
-      const newRun = await createRun(selectedProject.id, { query_text: queryText, mode });
-      setRun(newRun);
-      localStorage.setItem("astra_last_run_id", newRun.id);
-      setPlan([]);
-      setTasks([]);
-      setMetrics(null);
-      setApprovals([]);
-      setDismissedApprovalId(null);
-      resetEventBuffer();
-      setStatusMessage(null);
-      void openEventStream(newRun.id);
-      await createPlan(newRun.id);
-      await refreshSnapshot(newRun.id);
-      await startRun(newRun.id);
-      setQueryText("");
+      const response = await createRun(selectedProject.id, { query_text: queryText, mode });
+      if (response.kind === "clarify") {
+        const questions = response.questions?.filter(Boolean) || [];
+        setStatusMessage(questions.join(" ") || "Нужны уточнения.");
+        return;
+      }
+      if (response.kind === "chat") {
+        setStatusMessage(response.chat_response || "Ответ готов.");
+        setQueryText("");
+        return;
+      }
+      if (response.kind === "act" && response.run) {
+        const newRun = response.run;
+        setRun(newRun);
+        localStorage.setItem("astra_last_run_id", newRun.id);
+        setPlan([]);
+        setTasks([]);
+        setMetrics(null);
+        setApprovals([]);
+        setDismissedApprovalId(null);
+        resetEventBuffer();
+        setStatusMessage(null);
+        void openEventStream(newRun.id);
+        await createPlan(newRun.id);
+        await refreshSnapshot(newRun.id);
+        await startRun(newRun.id);
+        setQueryText("");
+        return;
+      }
+      setStatusMessage("Не удалось определить режим запуска.");
     } catch (err: unknown) {
       setStatusMessage(getErrorMessage(err, "Не удалось запустить"));
     }
