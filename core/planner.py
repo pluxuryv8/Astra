@@ -636,6 +636,25 @@ def _append_memory_step_if_needed(text: str, steps: list[PlanStep]) -> list[Plan
     return steps
 
 
+def _prepend_clarify_step(steps: list[PlanStep], questions: list[str]) -> list[PlanStep]:
+    if not questions:
+        return steps
+    clarify = _step(
+        0,
+        "Уточнить детали у пользователя",
+        KIND_CLARIFY,
+        {"questions": questions},
+        "Получены уточнения от пользователя",
+    )
+    new_steps = [clarify]
+    for step in steps:
+        step.step_index += 1
+        if step.depends_on:
+            step.depends_on = [idx + 1 for idx in step.depends_on]
+        new_steps.append(step)
+    return new_steps
+
+
 def create_plan_for_run(run: dict) -> list[dict]:
     query_text = run.get("query_text", "")
     meta = run.get("meta") or {}
@@ -659,6 +678,8 @@ def create_plan_for_run(run: dict) -> list[dict]:
 
     steps = _build_steps_from_text(_normalize(query_text), query_text)
     steps = _append_memory_step_if_needed(query_text, steps)
+    if meta.get("needs_clarification") and meta.get("intent_questions"):
+        steps = _prepend_clarify_step(steps, list(meta.get("intent_questions") or []))
     return [step.to_dict() for step in steps]
 
 

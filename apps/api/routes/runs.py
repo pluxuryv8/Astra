@@ -97,6 +97,7 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
         "intent_confidence": decision.confidence,
         "intent_reasons": decision.reasons,
         "intent_questions": decision.questions,
+        "needs_clarification": decision.needs_clarification,
         "act_hint": decision.act_hint.to_dict() if decision.act_hint else None,
         "danger_flags": decision.act_hint.danger_flags if decision.act_hint else [],
         "suggested_run_mode": decision.act_hint.suggested_run_mode if decision.act_hint else None,

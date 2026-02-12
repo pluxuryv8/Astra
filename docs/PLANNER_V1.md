@@ -3,6 +3,7 @@
 ## Что делает
 - Строит исполнимый план шагов по запросу пользователя.
 - Использует `IntentRouter`: `CHAT` → один шаг ответа, `ACT` → действия на компьютере, `ASK_CLARIFY` → план не строится.
+- Если `ACT` помечен `needs_clarification=true`, план начинается с шага `CLARIFY_QUESTION`.
 - В план добавляются `success_criteria`, `danger_flags` и `requires_approval`.
 - `shell` в MVP не используется.
 - `memory_save` добавляется только при явной команде “запомни/сохрани”.
@@ -22,6 +23,7 @@
 2. LLM fallback: если шаблон не найден — запрос к Brain с JSON-планом.
 3. Опасные шаги помечаются `danger_flags` + `requires_approval=true`.
 4. При паролях/кодах добавляется `CLARIFY_QUESTION` с просьбой ввода вручную.
+5. Если `needs_clarification` — первый шаг `CLARIFY_QUESTION` с вопросами IntentRouter.
 
 ## Память
 - `MEMORY_COMMIT` добавляется только если запрос содержит триггер: “запомни/сохрани/в память/зафиксируй”.

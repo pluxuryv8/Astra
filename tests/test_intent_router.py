@@ -27,7 +27,8 @@ def test_intent_chat_rules():
 def test_intent_ask_clarify_on_short():
     router = IntentRouter(brain=DummyBrain())
     decision = router.decide("сделай это")
-    assert decision.intent == INTENT_ASK
+    assert decision.intent == INTENT_ACT
+    assert decision.needs_clarification is True
     assert 1 <= len(decision.questions) <= 2
 
 
@@ -51,5 +52,25 @@ def test_intent_reminder_rule():
 def test_intent_reminder_needs_time():
     router = IntentRouter(brain=DummyBrain())
     decision = router.decide("напомни купить хлеб")
-    assert decision.intent == INTENT_ASK
+    assert decision.intent == INTENT_ACT
+    assert decision.needs_clarification is True
     assert decision.questions
+
+
+def test_intent_scenarios_rules():
+    router = IntentRouter(brain=DummyBrain())
+    cases = [
+        ("Астра, посмотри открытый проект посмотри где могут быть ошибки, можешь использовать открытое окно CODEX для удобства", INTENT_ACT),
+        ("Астра, посмотри напиши за меня доклад на тему '...' на 2 листа", INTENT_ACT),
+        ("Астра, перепиши из моих заметок, мои заметки в приложение obsidian, можешь разделять и дробить как посчитаешь нужным", INTENT_ACT),
+        ("Астра, проанализируй мои финансы по вот этому файлу и скажи на что я потратил больше всего денег", INTENT_ACT),
+        ("Астра, напиши проект в VsCode, мне нужен бот в телеграмме который будет принимать оплату и вежливо общаться с пользователями", INTENT_ACT),
+        ("В 16:00 напомни позвонить Маше", INTENT_ACT),
+        ("Отправь Маше в телеграм 'привет'", INTENT_ACT),
+        ("Найди в браузере 3 источника про экономические эффекты налоговых льгот и кратко суммируй", INTENT_ACT),
+        ("Астра, напиши какие есть экономические эффекты", INTENT_CHAT),
+        ("Мне нравится черно-белый минимализм", INTENT_CHAT),
+    ]
+    for text, expected in cases:
+        decision = router.decide(text)
+        assert decision.intent == expected

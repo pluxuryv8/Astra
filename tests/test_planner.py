@@ -10,8 +10,11 @@ from core import planner
 from core.intent_router import INTENT_ACT, INTENT_CHAT
 
 
-def _run(query: str, intent: str):
-    return {"query_text": query, "meta": {"intent": intent}}
+def _run(query: str, intent: str, meta: dict | None = None):
+    payload = {"query_text": query, "meta": {"intent": intent}}
+    if meta:
+        payload["meta"].update(meta)
+    return payload
 
 
 def test_planner_playlist_plan():
@@ -62,3 +65,15 @@ def test_planner_reminder_create():
     plan = planner.create_plan_for_run(run)
     kinds = {step["kind"] for step in plan}
     assert "REMINDER_CREATE" in kinds
+
+
+def test_planner_clarify_step_inserted():
+    run = _run(
+        "сделай это",
+        INTENT_ACT,
+        {"needs_clarification": True, "intent_questions": ["Что именно нужно сделать?"]},
+    )
+    plan = planner.create_plan_for_run(run)
+    assert plan
+    assert plan[0]["kind"] == "CLARIFY_QUESTION"
+    assert plan[0]["inputs"]["questions"] == ["Что именно нужно сделать?"]

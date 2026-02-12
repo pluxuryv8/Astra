@@ -47,6 +47,7 @@ class IntentDecision:
     confidence: float
     reasons: list[str]
     questions: list[str] = field(default_factory=list)
+    needs_clarification: bool = False
     act_hint: ActHint | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -55,6 +56,7 @@ class IntentDecision:
             "confidence": self.confidence,
             "reasons": list(self.reasons),
             "questions": list(self.questions),
+            "needs_clarification": self.needs_clarification,
             "act_hint": self.act_hint.to_dict() if self.act_hint else None,
         }
 
@@ -69,8 +71,20 @@ _ACTION_VERBS = (
     "запускай",
     "проверь",
     "проверить",
+    "посмотри",
     "выполни",
     "выполнить",
+    "найди",
+    "проанализируй",
+    "проанализировать",
+    "анализируй",
+    "перепиши",
+    "распредели",
+    "напиши",
+    "отправь",
+    "отправить",
+    "сделай",
+    "сделать",
     "удали",
     "удалить",
     "создай",
@@ -107,6 +121,14 @@ _ACTION_OBJECT_HINTS = (
     "таблиц",
     "проект",
     "репозиторий",
+    "доклад",
+    "отчет",
+    "отчёт",
+    "стать",
+    "эссе",
+    "заметк",
+    "obsidian",
+    "финанс",
 )
 
 _COMPUTER_CONTEXT = (
@@ -133,9 +155,31 @@ _CHAT_HINTS = (
     "посоветуй",
 )
 
+_CHAT_PATTERNS = (
+    "какие есть",
+    "что такое",
+    "почему",
+    "объясни",
+    "мне нравится",
+    "мне нравятся",
+    "мне грустно",
+)
+
+_ACT_PATTERNS = (
+    "найди в браузере",
+    "найди в интернете",
+    "найди в яндексе",
+    "найди в гугле",
+    "посмотри проект",
+    "посмотри код",
+    "посмотри окно",
+    "перепиши",
+    "проанализируй",
+    "проанализировать",
+)
+
 _AMBIGUOUS_PHRASES = (
     "сделай это",
-    "посмотри",
     "это",
     "сделай",
     "помоги",
@@ -189,7 +233,7 @@ class IntentRouter:
         decision = self._rule_based(normalized)
         if decision and decision.confidence >= self.rule_confidence:
             return decision
-        if decision and decision.intent == INTENT_ASK:
+        if decision and decision.intent in {INTENT_ACT, INTENT_CHAT}:
             return decision
 
         llm_decision = self._llm_classify(normalized)
@@ -208,17 +252,26 @@ class IntentRouter:
                 intent=INTENT_ACT,
                 confidence=0.82,
                 reasons=["memory_trigger"],
+                needs_clarification=False,
                 act_hint=ActHint(target=TARGET_TEXT_ONLY, danger_flags=[], suggested_run_mode="execute_confirm"),
             )
 
         if _contains_any(text, _REMINDER_TRIGGERS):
             _, _, question = parse_reminder_text(text)
             if question:
-                return IntentDecision(intent=INTENT_ASK, confidence=0.7, reasons=["reminder_needs_time"], questions=[question])
+                return IntentDecision(
+                    intent=INTENT_ACT,
+                    confidence=0.74,
+                    reasons=["reminder_needs_time"],
+                    questions=[question],
+                    needs_clarification=True,
+                    act_hint=ActHint(target=TARGET_TEXT_ONLY, danger_flags=[], suggested_run_mode="execute_confirm"),
+                )
             return IntentDecision(
                 intent=INTENT_ACT,
                 confidence=0.84,
                 reasons=["reminder_trigger"],
+                needs_clarification=False,
                 act_hint=ActHint(target=TARGET_TEXT_ONLY, danger_flags=[], suggested_run_mode="execute_confirm"),
             )
 
@@ -226,40 +279,53 @@ class IntentRouter:
         has_action_object = _contains_any(text, _ACTION_OBJECT_HINTS)
         has_computer_context = _contains_any(text, _COMPUTER_CONTEXT)
         has_chat_hint = _contains_any(text, _CHAT_HINTS) or text.endswith("?")
+        has_chat_pattern = _contains_any(text, _CHAT_PATTERNS)
+        has_act_pattern = _contains_any(text, _ACT_PATTERNS)
+        has_browser_find = "найди" in text and _contains_any(text, ("в браузере", "в интернете", "в яндексе", "в гугле"))
+        has_doc_request = _contains_any(text, ("доклад", "отчет", "отчёт", "стать", "эссе", "документ"))
         has_url = bool(re.search(r"https?://", text))
 
         reasons: list[str] = []
-        if ambiguous and not has_action_verb and not has_chat_hint:
+        if ambiguous and not has_action_verb and not has_chat_hint and not has_chat_pattern:
             return self._build_clarify(["ambiguous_short"], hint="short")
 
-        is_act = has_action_verb and (has_action_object or has_computer_context or has_url)
-        is_chat = has_chat_hint and not has_action_verb
+        explicit_act = has_action_object or has_computer_context or has_url or has_browser_find or has_act_pattern or has_doc_request
+        chat_signal = has_chat_hint or has_chat_pattern or text.endswith("?")
 
-        if is_act and not is_chat:
-            reasons.append("action_verbs")
-            if has_action_object:
-                reasons.append("action_object")
-            if has_computer_context:
-                reasons.append("computer_context")
+        if has_browser_find:
+            reasons.append("browser_find")
             danger_flags = sorted(self._detect_danger_flags(text))
             act_hint = self._build_act_hint(text, danger_flags)
             return IntentDecision(intent=INTENT_ACT, confidence=0.9, reasons=reasons, act_hint=act_hint)
 
-        if is_chat and not is_act:
-            reasons.append("chat_hints")
+        if chat_signal and not explicit_act:
+            reasons.append("chat_signal")
             if text.endswith("?"):
                 reasons.append("question")
             return IntentDecision(intent=INTENT_CHAT, confidence=0.85, reasons=reasons)
 
-        if is_act and is_chat:
-            reasons.append("conflict_act_chat")
-            return IntentDecision(intent=INTENT_ASK, confidence=0.55, reasons=reasons, questions=self._default_questions())
+        if explicit_act or has_action_verb:
+            reasons.append("action_signal")
+            if has_action_object:
+                reasons.append("action_object")
+            if has_computer_context:
+                reasons.append("computer_context")
+            if has_doc_request:
+                reasons.append("doc_request")
+            danger_flags = sorted(self._detect_danger_flags(text))
+            act_hint = self._build_act_hint(text, danger_flags)
+            needs_clarification = not explicit_act
+            questions = self._default_questions() if needs_clarification else []
+            return IntentDecision(
+                intent=INTENT_ACT,
+                confidence=0.9 if not needs_clarification else 0.7,
+                reasons=reasons,
+                questions=questions,
+                needs_clarification=needs_clarification,
+                act_hint=act_hint,
+            )
 
-        if has_action_verb and not has_action_object and not has_computer_context:
-            reasons.append("action_verb_no_context")
-            return IntentDecision(intent=INTENT_ASK, confidence=0.6, reasons=reasons, questions=self._default_questions())
-
-        if has_chat_hint:
+        if chat_signal:
             reasons.append("chat_hint_low")
             return IntentDecision(intent=INTENT_CHAT, confidence=0.65, reasons=reasons)
 
@@ -282,7 +348,7 @@ class IntentRouter:
         questions = self._default_questions()
         if hint == "short":
             questions = ["Нужно ответить текстом или выполнить действия на компьютере?"]
-        return IntentDecision(intent=INTENT_ASK, confidence=0.5, reasons=reasons, questions=questions)
+        return IntentDecision(intent=INTENT_ASK, confidence=0.5, reasons=reasons, questions=questions, needs_clarification=False)
 
     def _detect_danger_flags(self, text: str) -> set[str]:
         flags: set[str] = set()
@@ -366,6 +432,7 @@ class IntentRouter:
             confidence=max(0.0, min(confidence, 1.0)),
             reasons=list(reasons),
             questions=questions,
+            needs_clarification=False,
             act_hint=act_hint,
         )
 
