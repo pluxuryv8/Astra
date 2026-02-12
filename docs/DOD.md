@@ -10,8 +10,9 @@
 - `GET /api/v1/projects` возвращает список проектов (см. `apps/api/routes/projects.py:10-28`).
 
 ## 3) UI жив
-- UI загружается из Tauri/Vite и вызывает API базовый URL через `apps/desktop/src/api.ts` (см. `apps/desktop/src/api.ts:14-200`).
-- В UI есть HUD, который строится на основе состояния событий/снапшота (см. `apps/desktop/src/App.tsx:167-230`, `apps/desktop/src/App.tsx:857-879`).
+- UI загружается из Tauri/Vite и вызывает API базовый URL через `apps/desktop/src/api.ts` (см. `apps/desktop/src/api.ts`).
+- Основной layout: Sidebar (runs), Main (chat), Inspector (steps/events/approvals/metrics) — см. `apps/desktop/src/App.tsx`.
+- Memory панель доступна из UI и использует `/api/v1/memory/list` + delete (см. `apps/desktop/src/ui/MemoryPanel.tsx`, `apps/desktop/src/api.ts`).
 
 ## 4) События живы (SSE)
 - SSE endpoint: `GET /api/v1/runs/{run_id}/events` отдаёт `text/event-stream` и читает события из БД (см. `apps/api/routes/run_events.py:12-48`).

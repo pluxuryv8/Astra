@@ -40,35 +40,33 @@ export default function SettingsPanel({
   isStandalone
 }: SettingsPanelProps) {
   return (
-    <div className={`settings-panel ${isStandalone ? "standalone" : ""}`} onClick={(e) => e.stopPropagation()}>
-      <div className="settings-header">
+    <div className={`panel settings-panel ${isStandalone ? "standalone" : ""}`}>
+      <div className="panel-header">
         <div>
-          <div className="settings-title">Настройки</div>
-          <div className="settings-subtitle">Модель, ключ и режимы</div>
+          <div className="panel-title">Settings</div>
+          <div className="panel-subtitle">Модель, ключ, режимы</div>
         </div>
-        <button className="icon-button" onClick={onClose} title="Закрыть">
+        <button className="btn ghost small" onClick={onClose} title="Закрыть">
           ✕
         </button>
       </div>
 
-      {message ? <div className={`settings-banner ${message.tone}`}>{message.text}</div> : null}
+      {message ? <div className={`banner ${message.tone}`}>{message.text}</div> : null}
 
-      <div className="settings-section">
+      <div className="panel-section">
         <div className="section-title">Модель и ключ</div>
-        <div className="settings-row">
-          <div className={`status-dot ${keyStored ? "on" : "off"}`} />
-          <div className="settings-note">{keyStored ? "Ключ сохранён" : "Ключ не сохранён"}</div>
-          <div className="settings-note">
-            API: {apiAvailable === null ? "проверка…" : apiAvailable ? "подключён" : "не отвечает"}
-          </div>
+        <div className="status-row compact">
+          <span className={`pill ${keyStored ? "ok" : "warn"}`}>{keyStored ? "Ключ сохранён" : "Ключ не задан"}</span>
+          <span className="status-chip">API: {apiAvailable === null ? "проверка" : apiAvailable ? "OK" : "нет"}</span>
         </div>
-        <label className="settings-field">
+        <label className="field">
           <span>Модель</span>
-          <input type="text" value={modelName} onChange={(e) => onModelChange(e.target.value)} placeholder="gpt-4.1" />
+          <input className="input" type="text" value={modelName} onChange={(e) => onModelChange(e.target.value)} />
         </label>
-        <label className="settings-field">
+        <label className="field">
           <span>Ключ</span>
           <input
+            className="input"
             type="password"
             value={openaiKey}
             onChange={(e) => onOpenaiKeyChange(e.target.value)}
@@ -80,7 +78,7 @@ export default function SettingsPanel({
         </button>
       </div>
 
-      <div className="settings-section">
+      <div className="panel-section">
         <div className="section-title">Режим запуска</div>
         <select value={mode} onChange={(e) => onModeChange(e.target.value)}>
           {modeOptions.map((option) => (
@@ -91,15 +89,15 @@ export default function SettingsPanel({
         </select>
       </div>
 
-      <div className="settings-section">
+      <div className="panel-section">
         <div className="section-title">Визуал</div>
-        <label className="toggle">
+        <label className="checkbox">
           <input type="checkbox" checked={animatedBg} onChange={(e) => onAnimatedBgChange(e.target.checked)} />
-          <span>Анимированный фон</span>
+          Анимированный фон
         </label>
       </div>
 
-      <div className="settings-section">
+      <div className="panel-section">
         <div className="section-title">Разрешения macOS</div>
         <div className="settings-perm">
           <span>Запись экрана</span>

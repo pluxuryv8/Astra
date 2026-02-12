@@ -52,3 +52,11 @@ def search_memory(project_id: str, q: str = "", type: str | None = None, from_ts
     if not project:
         raise HTTPException(status_code=404, detail="Проект не найден")
     return store.search_memory(project_id, q, type, from_ts, to_ts, tags)
+
+
+@router.get("/{project_id}/runs")
+def list_runs(project_id: str, limit: int = 50):
+    project = store.get_project(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Проект не найден")
+    return store.list_runs(project_id, limit=limit)

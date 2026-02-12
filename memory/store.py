@@ -231,6 +231,31 @@ def get_run(run_id: str) -> Optional[dict]:
     }
 
 
+def list_runs(project_id: str, limit: int = 50) -> list[dict]:
+    conn = _conn_or_raise()
+    limit = max(1, min(limit, 200))
+    rows = conn.execute(
+        "SELECT * FROM runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+        (project_id, limit),
+    ).fetchall()
+    return [
+        {
+            "id": row["id"],
+            "project_id": row["project_id"],
+            "query_text": row["query_text"],
+            "mode": row["mode"],
+            "parent_run_id": row["parent_run_id"],
+            "purpose": row["purpose"],
+            "meta": _json_load(row["meta"]) or {},
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+        }
+        for row in rows
+    ]
+
+
 def update_run_status(run_id: str, status: str, started_at: Optional[str] = None, finished_at: Optional[str] = None) -> None:
     conn = _conn_or_raise()
     with _lock:

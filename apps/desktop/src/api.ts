@@ -102,6 +102,10 @@ export function listProjects(): Promise<Project[]> {
   return api<Project[]>("/projects");
 }
 
+export function listRuns(projectId: string, limit = 50): Promise<Run[]> {
+  return api<Run[]>(`/projects/${projectId}/runs?limit=${limit}`);
+}
+
 export function updateProject(
   projectId: string,
   payload: { name?: string | null; tags?: string[] | null; settings?: ProjectSettings | null }
