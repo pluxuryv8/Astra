@@ -63,6 +63,7 @@ const EVENT_TYPES = [
   "conflict_detected",
   "verification_done",
   "approval_requested",
+  "approval_resolved",
   "approval_approved",
   "approval_rejected",
   "autopilot_state",
@@ -185,7 +186,7 @@ export default function App() {
   const [keyStored, setKeyStored] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<{ text: string; tone: "success" | "error" | "info" } | null>(null);
-  const [modelName, setModelName] = useState("gpt-4.1-mini");
+  const [modelName, setModelName] = useState("gpt-4.1");
   const [animatedBg, setAnimatedBg] = useState<boolean>(() => localStorage.getItem(ANIM_BG_KEY) !== "0");
   const [isCompact, setIsCompact] = useState<boolean>(() => localStorage.getItem(COMPACT_KEY) === "1");
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -290,7 +291,7 @@ export default function App() {
     if (!selectedProject) return;
     const settings = selectedProject.settings || {};
     const llm = (settings.llm || {}) as ProjectSettings["llm"];
-    setModelName(llm?.model || "gpt-4.1-mini");
+    setModelName(llm?.model || "gpt-4.1");
   }, [selectedProject]);
 
   useEffect(() => {
@@ -566,7 +567,7 @@ export default function App() {
         ...llm,
         provider: "openai",
         base_url: llm.base_url || "https://api.openai.com/v1",
-        model: modelName.trim() || llm.model || "gpt-4.1-mini"
+        model: modelName.trim() || llm.model || "gpt-4.1"
       }
     };
     const updated = await updateProject(projectId, { settings: nextSettings });

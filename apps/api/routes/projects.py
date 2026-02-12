@@ -18,7 +18,7 @@ def create_project(payload: ProjectCreate):
             "llm": {
                 "provider": "openai",
                 "base_url": "https://api.openai.com/v1",
-                "model": "gpt-4.1-mini",
+                "model": "gpt-4.1",
             }
         }
     project = store.create_project(payload.name, payload.tags, settings)

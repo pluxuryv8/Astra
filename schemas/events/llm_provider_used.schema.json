@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/llm_provider_used.schema.json",
+  "title": "llm_provider_used",
+  "type": "object",
+  "properties": {
+    "route": {
+      "type": "string",
+      "enum": [
+        "LOCAL",
+        "CLOUD"
+      ]
+    },
+    "provider_name": {
+      "type": "string"
+    },
+    "model": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "route",
+    "provider_name"
+  ],
+  "additionalProperties": false
+}

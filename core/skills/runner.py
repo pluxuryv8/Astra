@@ -86,6 +86,18 @@ class SkillRunner:
             )
 
             approval = self._wait_for_approval(run["id"], approval["id"])
+            emit(
+                run["id"],
+                "approval_resolved",
+                "Подтверждение завершено",
+                {
+                    "approval_id": approval["id"],
+                    "status": approval["status"],
+                    "decision": approval.get("decision"),
+                },
+                task_id=task["id"],
+                step_id=step["id"],
+            )
             if approval["status"] != "approved":
                 emit(
                     run["id"],

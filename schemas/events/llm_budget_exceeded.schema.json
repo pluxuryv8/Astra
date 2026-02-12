@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/llm_budget_exceeded.schema.json",
+  "title": "llm_budget_exceeded",
+  "type": "object",
+  "properties": {
+    "budget_name": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "current": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "budget_name",
+    "limit",
+    "current"
+  ],
+  "additionalProperties": false
+}

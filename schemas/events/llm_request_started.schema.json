@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/llm_request_started.schema.json",
+  "title": "llm_request_started",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "provider",
+    "model_id"
+  ],
+  "additionalProperties": false
+}

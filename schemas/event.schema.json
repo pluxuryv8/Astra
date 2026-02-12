@@ -7,6 +7,9 @@
     "id": {
       "type": "string"
     },
+    "seq": {
+      "type": "integer"
+    },
     "run_id": {
       "type": "string"
     },
@@ -18,12 +21,20 @@
       "enum": [
         "approval_approved",
         "approval_rejected",
+        "approval_resolved",
         "approval_requested",
         "artifact_created",
         "autopilot_action",
         "autopilot_state",
         "conflict_detected",
         "fact_extracted",
+        "llm_provider_used",
+        "llm_budget_exceeded",
+        "llm_request_failed",
+        "llm_request_started",
+        "llm_request_succeeded",
+        "llm_request_sanitized",
+        "llm_route_decided",
         "plan_created",
         "run_canceled",
         "run_created",

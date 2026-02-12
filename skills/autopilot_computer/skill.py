@@ -10,7 +10,8 @@ from typing import Any
 
 from core.bridge.desktop_bridge import DesktopBridge
 from core.event_bus import emit
-from core.providers.llm_client import build_llm_client
+from core.brain import LLMRequest, get_brain
+from core.llm_routing import ContextItem
 from core.skills.result_types import ArtifactCandidate, FactCandidate, SkillResult
 from memory import store
 
@@ -97,11 +98,6 @@ class AutopilotComputerSkill:
         if ctx.run.get("mode") not in ("execute_confirm", "autopilot_safe"):
             raise RuntimeError("Для автопилота нужен режим выполнения с подтверждением")
 
-        try:
-            client = build_llm_client(ctx.settings)
-        except Exception as exc:
-            raise RuntimeError(f"Не настроена языковая модель: {exc}")
-
         cycles_log: list[dict] = []
         interventions: list[str] = []
         last_action_hashes: list[str] = []
@@ -137,28 +133,76 @@ class AutopilotComputerSkill:
             image_width = int(screen.get("width") or 0)
             image_height = int(screen.get("height") or 0)
 
-            model_input = {
-                "goal": goal,
-                "hints": hints,
-                "cycle": cycle,
-                "max_cycles": max_cycles,
-                "screen": {
+            context_items = [
+                ContextItem(
+                    content=goal,
+                    source_type="user_prompt",
+                    sensitivity="personal",
+                    provenance=f"run:{ctx.run['id']}",
+                ),
+                ContextItem(
+                    content=hints,
+                    source_type="system_note",
+                    sensitivity="personal",
+                    provenance=f"run:{ctx.run['id']}",
+                ),
+                ContextItem(
+                    content={
+                        "image_base64": image_b64,
+                        "width": screen.get("width"),
+                        "height": screen.get("height"),
+                    },
+                    source_type="app_ui_text",
+                    sensitivity="personal",
+                    provenance="desktop_capture",
+                ),
+            ]
+
+            def build_messages(items: list[ContextItem]) -> list[dict[str, Any]]:
+                goal_value = goal
+                hints_value = hints
+                screen_value = {
                     "image_base64": image_b64,
                     "width": screen.get("width"),
                     "height": screen.get("height"),
-                },
-                "recent_actions": cycles_log[-3:],
-            }
+                }
+                for item in items:
+                    if item.source_type == "user_prompt":
+                        goal_value = item.content
+                    elif item.source_type == "system_note":
+                        hints_value = item.content
+                    elif item.source_type == "app_ui_text":
+                        screen_value = item.content
 
-            response = client.chat(
-                [
+                model_input = {
+                    "goal": goal_value,
+                    "hints": hints_value,
+                    "cycle": cycle,
+                    "max_cycles": max_cycles,
+                    "screen": screen_value,
+                    "recent_actions": cycles_log[-3:],
+                }
+                return [
                     {"role": "system", "content": _load_prompt(ctx.base_dir)},
                     {"role": "user", "content": json.dumps(model_input, ensure_ascii=False)},
-                ],
-                temperature=0.2,
-            )
+                ]
 
-            content = response.get("choices", [{}])[0].get("message", {}).get("content", "{}").strip()
+            request = LLMRequest(
+                purpose="autopilot_computer",
+                task_kind="autopilot",
+                context_items=context_items,
+                render_messages=build_messages,
+                preferred_model_kind="chat",
+                temperature=0.2,
+                run_id=ctx.run.get("id"),
+                task_id=ctx.task.get("id"),
+                step_id=ctx.plan_step.get("id"),
+            )
+            response = get_brain().call(request, ctx)
+            if response.status != "ok":
+                raise RuntimeError(response.error_type or "llm_failed")
+
+            content = (response.text or "{}").strip()
             try:
                 parsed = json.loads(content)
             except Exception:
@@ -337,6 +381,12 @@ class AutopilotComputerSkill:
         }, task_id=ctx.task["id"], step_id=ctx.plan_step["id"])
 
         approval = self._wait_for_approval(approval["id"], ctx.run["id"])
+        if approval:
+            emit(ctx.run["id"], "approval_resolved", "Подтверждение завершено", {
+                "approval_id": approval["id"],
+                "status": approval.get("status"),
+                "decision": approval.get("decision"),
+            }, task_id=ctx.task["id"], step_id=ctx.plan_step["id"])
         if approval and approval.get("status") == "approved":
             emit(ctx.run["id"], "approval_approved", "Подтверждение принято", {"approval_id": approval["id"]}, task_id=ctx.task["id"], step_id=ctx.plan_step["id"])
             store.update_task_status(ctx.task["id"], "running")
@@ -354,8 +404,8 @@ class AutopilotComputerSkill:
                 return approval
             run = store.get_run(run_id)
             if run and run["status"] == "canceled":
-                store.update_approval_status(approval_id, "expired", "system")
-                return None
+                approval = store.update_approval_status(approval_id, "expired", "system")
+                return approval
             time.sleep(0.5)
 
 

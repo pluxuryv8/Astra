@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/llm_request_sanitized.schema.json",
+  "title": "llm_request_sanitized",
+  "type": "object",
+  "properties": {
+    "removed_counts_by_source_type": {
+      "type": "object"
+    },
+    "truncated_chars": {
+      "type": "integer"
+    },
+    "final_len": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "removed_counts_by_source_type",
+    "truncated_chars",
+    "final_len"
+  ],
+  "additionalProperties": false
+}

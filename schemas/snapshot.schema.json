@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/snapshot.schema.json",
+  "title": "RunSnapshot",
+  "type": "object",
+  "properties": {
+    "run": {"$ref": "run.schema.json"},
+    "plan": {"type": "array", "items": {"$ref": "plan_step.schema.json"}},
+    "tasks": {"type": "array", "items": {"$ref": "task.schema.json"}},
+    "sources": {"type": "array", "items": {"$ref": "source.schema.json"}},
+    "facts": {"type": "array", "items": {"$ref": "fact.schema.json"}},
+    "conflicts": {"type": "array", "items": {"$ref": "conflict.schema.json"}},
+    "artifacts": {"type": "array", "items": {"$ref": "artifact.schema.json"}},
+    "approvals": {"type": "array", "items": {"$ref": "approval.schema.json"}},
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "coverage": {
+          "type": "object",
+          "properties": {
+            "done": {"type": "integer"},
+            "total": {"type": "integer"}
+          },
+          "required": ["done", "total"],
+          "additionalProperties": false
+        },
+        "conflicts": {"type": "integer"},
+        "freshness": {
+          "type": ["object", "null"],
+          "properties": {
+            "min": {"type": "string"},
+            "max": {"type": "string"},
+            "count": {"type": "integer"}
+          },
+          "required": ["min", "max", "count"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["coverage", "conflicts", "freshness"],
+      "additionalProperties": false
+    },
+    "last_events": {"type": "array", "items": {"$ref": "event.schema.json"}}
+  },
+  "required": [
+    "run",
+    "plan",
+    "tasks",
+    "sources",
+    "facts",
+    "conflicts",
+    "artifacts",
+    "approvals",
+    "metrics",
+    "last_events"
+  ],
+  "additionalProperties": false
+}

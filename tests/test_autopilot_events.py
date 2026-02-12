@@ -12,8 +12,9 @@ from memory import store
 ROOT = Path(__file__).resolve().parents[1]
 
 
-class StubLLM:
-    def chat(self, messages, model=None, temperature=0.2, json_schema=None, tools=None):
+class StubBrain:
+    def call(self, request, ctx):
+        from core.brain.types import LLMResponse
         payload = {
             "goal": "Тест автопилота",
             "plan": [],
@@ -24,7 +25,15 @@ class StubLLM:
             "ask_confirm": {"required": False, "reason": "", "proposed_effect": ""},
             "done": False,
         }
-        return {"choices": [{"message": {"content": json.dumps(payload, ensure_ascii=False)}}]}
+        return LLMResponse(
+            text=json.dumps(payload, ensure_ascii=False),
+            usage=None,
+            provider="local",
+            model_id="stub",
+            latency_ms=1,
+            cache_hit=False,
+            route_reason="stub",
+        )
 
 
 class StubBridge:
@@ -52,9 +61,9 @@ def _prepare_engine(tmp_path: Path):
 def test_autopilot_events_persist(monkeypatch, tmp_path):
     engine = _prepare_engine(tmp_path)
 
-    # stub LLM
-    from core.providers import llm_client
-    monkeypatch.setattr(llm_client, "build_llm_client", lambda settings: StubLLM())
+    # stub Brain
+    import core.brain
+    monkeypatch.setattr(core.brain, "get_brain", lambda: StubBrain())
 
     # stub bridge on the existing skill instance
     from skills.autopilot_computer.skill import skill as autopilot_skill
@@ -64,7 +73,7 @@ def test_autopilot_events_persist(monkeypatch, tmp_path):
         "autopilot",
         [],
         {
-            "llm": {"provider": "openai", "base_url": "https://api.openai.com/v1", "model": "gpt-4.1-mini"},
+            "llm": {"provider": "openai", "base_url": "http://localhost:1234/v1", "model": "gpt-4.1-mini"},
             "autopilot": {"max_cycles": 1, "max_actions": 1, "loop_delay_ms": 200},
         },
     )

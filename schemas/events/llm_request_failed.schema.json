@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/llm_request_failed.schema.json",
+  "title": "llm_request_failed",
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error_type": {
+      "type": "string"
+    },
+    "http_status_if_any": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "retry_count": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "provider",
+    "model_id",
+    "error_type",
+    "http_status_if_any",
+    "retry_count"
+  ],
+  "additionalProperties": false
+}

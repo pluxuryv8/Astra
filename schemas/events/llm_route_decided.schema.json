@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/llm_route_decided.schema.json",
+  "title": "llm_route_decided",
+  "type": "object",
+  "properties": {
+    "route": {
+      "type": "string",
+      "enum": [
+        "LOCAL",
+        "CLOUD"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "model_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "items_summary_by_source_type": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "route",
+    "reason",
+    "provider",
+    "model_id",
+    "items_summary_by_source_type"
+  ],
+  "additionalProperties": false
+}

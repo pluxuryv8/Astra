@@ -80,7 +80,7 @@ if [ "$MODE" = "background" ]; then
   if check_api; then
     echo "API уже запущен на порту $API_PORT"
   else
-    "$PYTHON_VENV" -m uvicorn apps.api.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG_DIR/api.log" 2>&1 &
+    nohup "$PYTHON_VENV" -m uvicorn apps.api.main:app --host 127.0.0.1 --port "$API_PORT" >"$LOG_DIR/api.log" 2>&1 &
     API_PID=$!
     echo "$API_PID" > .astra/api.pid
 

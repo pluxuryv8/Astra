@@ -5,12 +5,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from core.providers.llm_client import build_llm_client
+from core.brain import LLMRequest, get_brain
+from core.llm_routing import ContextItem
 from core.skills.result_types import FactCandidate, SkillResult
 from memory import store
-
-
-
 
 def _load_system_prompt(base_dir: str) -> str:
     prompt_path = Path(base_dir) / "prompts" / "extract_facts_system.txt"
@@ -45,21 +43,24 @@ def _heuristic_facts(text: str) -> list[tuple[str, Any]]:
     return facts
 
 
-def _parse_llm_response(resp: dict) -> list[dict]:
+def _parse_llm_response(resp: dict | str) -> list[dict]:
     if not resp:
         return []
-    if "choices" in resp:
+    if isinstance(resp, str):
+        content = resp
+    elif "choices" in resp:
         content = resp["choices"][0]["message"]["content"]
-        try:
-            parsed = json.loads(content)
-        except Exception:
-            start = content.find("{")
-            end = content.rfind("}")
-            if start == -1 or end == -1:
-                return []
-            parsed = json.loads(content[start : end + 1])
-        return parsed.get("facts", [])
-    return []
+    else:
+        return []
+    try:
+        parsed = json.loads(content)
+    except Exception:
+        start = content.find("{")
+        end = content.rfind("}")
+        if start == -1 or end == -1:
+            return []
+        parsed = json.loads(content[start : end + 1])
+    return parsed.get("facts", [])
 
 
 def run(inputs: dict, ctx) -> SkillResult:
@@ -73,28 +74,69 @@ def run(inputs: dict, ctx) -> SkillResult:
     assumptions: list[str] = []
 
     try:
-        client = build_llm_client(ctx.settings)
-        snippets = [
-            {
-                "source_id": s["id"],
-                "title": s.get("title"),
-                "url": s.get("url"),
-                "snippet": s.get("snippet"),
-            }
+        context_items = [
+            ContextItem(
+                content={
+                    "source_id": s["id"],
+                    "title": s.get("title"),
+                    "url": s.get("url"),
+                    "snippet": s.get("snippet"),
+                },
+                source_type="web_page_text",
+                sensitivity="public",
+                provenance=s.get("url") or s["id"],
+            )
             for s in sources
             if s.get("snippet")
         ]
-        resp = client.chat(
-            [
+
+        def build_messages(items: list[ContextItem]) -> list[dict[str, Any]]:
+            snippets: list[dict[str, Any]] = []
+            for item in items:
+                data = item.content
+                if isinstance(data, dict):
+                    snippet = data.get("snippet")
+                    if not snippet:
+                        continue
+                    snippets.append({
+                        "source_id": data.get("source_id") or item.provenance,
+                        "title": data.get("title"),
+                        "url": data.get("url") or item.provenance,
+                        "snippet": snippet,
+                    })
+                else:
+                    snippet = str(data)
+                    if not snippet:
+                        continue
+                    snippets.append({
+                        "source_id": item.provenance or "",
+                        "url": item.provenance,
+                        "snippet": snippet,
+                    })
+
+            return [
                 {
                     "role": "system",
                     "content": _load_system_prompt(ctx.base_dir),
                 },
                 {"role": "user", "content": json.dumps({"snippets": snippets}, ensure_ascii=False)},
-            ],
+            ]
+
+        request = LLMRequest(
+            purpose="extract_facts",
+            task_kind="fact_extraction",
+            context_items=context_items,
+            render_messages=build_messages,
+            preferred_model_kind="chat",
             temperature=0.2,
+            run_id=ctx.run.get("id"),
+            task_id=ctx.task.get("id"),
+            step_id=ctx.plan_step.get("id"),
         )
-        facts = _parse_llm_response(resp)
+        response = get_brain().call(request, ctx)
+        if response.status != "ok":
+            raise RuntimeError(response.error_type or "llm_failed")
+        facts = _parse_llm_response(response.text)
         for fact in facts:
             if not fact.get("key") or "value" not in fact:
                 continue

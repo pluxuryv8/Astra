@@ -64,7 +64,7 @@ export default function SettingsPanel({
         </div>
         <label className="settings-field">
           <span>Модель</span>
-          <input type="text" value={modelName} onChange={(e) => onModelChange(e.target.value)} placeholder="gpt-4.1-mini" />
+          <input type="text" value={modelName} onChange={(e) => onModelChange(e.target.value)} placeholder="gpt-4.1" />
         </label>
         <label className="settings-field">
           <span>Ключ</span>

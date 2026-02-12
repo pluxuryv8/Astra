@@ -1,5 +1,7 @@
 line-length = 100
 target-version = "py311"
+
+[lint]
 select = ["E", "F", "I"]
 
 exclude = [
@@ -8,5 +10,6 @@ exclude = [
   "node_modules",
   "artifacts",
   "apps/desktop",
-  "third_party/_donors"
+  "third_party/_donors",
+  "archive"
 ]
