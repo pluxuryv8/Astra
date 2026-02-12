@@ -55,6 +55,13 @@ brew install tesseract
 - `runtime` проверяет поднятые сервисы и health-запросы API.
 - Использует `ASTRA_API_PORT`/`ASTRA_API_BASE` при наличии (см. `scripts/doctor.sh:9-13`).
 
+## Smoke approvals/SSE
+```bash
+./scripts/smoke_approvals_sse.sh
+```
+- Требует поднятый API (`/auth/status` должен возвращать 200).
+- Использует `ASTRA_SESSION_TOKEN` или `.astra/doctor.token`.
+
 ## Проверки качества (одна команда)
 ```bash
 ./scripts/check.sh

@@ -242,7 +242,11 @@ PY
 import json
 try:
   data=json.loads("""$RUN_JSON""")
-  print(data.get("id",""))
+  if isinstance(data, dict):
+    run=data.get("run") or {}
+    print(run.get("id") or data.get("id") or "")
+  else:
+    print("")
 except Exception:
   print("")
 PY
