@@ -99,6 +99,15 @@ select {
   background: transparent;
 }
 
+.settings-only {
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .sidebar {
   width: 260px;
   background: var(--surface);
@@ -779,6 +788,16 @@ select {
   font-size: 11px;
 }
 
+.btn.tiny {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+
+.btn.active {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
 .input {
   background: var(--surface-2);
   border: 1px solid var(--border);
@@ -802,6 +821,78 @@ select {
 
 .muted {
   color: var(--muted);
+}
+
+.overlay-shell {
+  width: 360px;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  background: rgba(12, 13, 18, 0.92);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.overlay-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+
+.overlay-status {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--muted);
+}
+
+.overlay-status.ok {
+  color: var(--ok);
+}
+
+.overlay-status.warn {
+  color: var(--warn);
+}
+
+.overlay-status.error {
+  color: var(--error);
+}
+
+.overlay-step {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overlay-meta {
+  font-size: 10px;
+  color: var(--faint);
+}
+
+.overlay-stream {
+  margin-left: 6px;
+}
+
+.overlay-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-end;
+}
+
+.overlay-modes,
+.overlay-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
 }
 
 @media (max-width: 1100px) {

@@ -1,10 +1,11 @@
 # UI Guide (Astra Desktop)
 
 ## Layout
-- Sidebar: список runs, поиск, кнопки Memory/Settings. См. `apps/desktop/src/App.tsx`.
-- Main: чат, статус агента, поле ввода, быстрые действия. См. `apps/desktop/src/App.tsx`.
-- Inspector: вкладки Steps/Events/Approvals/Metrics (панель справа). См. `apps/desktop/src/App.tsx`.
+- Sidebar: список runs, поиск, кнопки Memory/Settings. См. `apps/desktop/src/MainApp.tsx`.
+- Main: чат, статус агента, поле ввода, быстрые действия. См. `apps/desktop/src/MainApp.tsx`.
+- Inspector: вкладки Steps/Events/Approvals/Metrics (панель справа). См. `apps/desktop/src/MainApp.tsx`.
 - Memory/Settings: панели в правой колонке. См. `apps/desktop/src/ui/MemoryPanel.tsx`, `apps/desktop/src/ui/SettingsPanel.tsx`.
+- Overlay (маленькое окно): см. `apps/desktop/src/OverlayApp.tsx` (открывается как `?view=overlay`).
 
 ## Data Flow
 - Projects: `GET /api/v1/projects` через `apps/desktop/src/api.ts:listProjects`.
@@ -16,12 +17,12 @@
 
 ## Events (SSE)
 - Endpoint: `GET /api/v1/runs/{run_id}/events`.
-- Подписка и дедуп: `apps/desktop/src/App.tsx` + `apps/desktop/src/ui/utils.ts:mergeEvents`.
+- Подписка и дедуп: `apps/desktop/src/MainApp.tsx` + `apps/desktop/src/ui/utils.ts:mergeEvents`.
 - Буфер ограничен `EVENT_BUFFER_LIMIT`.
 
 ## UI State
 - Выбранный run хранится в `localStorage` (`astra_last_run_id`) и восстанавливается при запуске.
-- Inspector/Memory/Settings управляются через `rightPanel` в `apps/desktop/src/App.tsx`.
+- Inspector/Memory/Settings управляются через `rightPanel` в `apps/desktop/src/MainApp.tsx`.
 
 ## Style Tokens
 - Токены и базовые стили: `apps/desktop/src/app.css`.
