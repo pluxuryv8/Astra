@@ -35,6 +35,15 @@ npm --prefix apps/desktop run tauri dev
 
 UI читает API base из `VITE_API_BASE` или `VITE_API_PORT` (по умолчанию 8055) (см. `apps/desktop/src/api.ts:14-16`).
 
+## Local LLM (Ollama)
+Sanity-check:
+```bash
+curl -s http://127.0.0.1:11434/api/tags
+curl -s -X POST http://127.0.0.1:11434/api/chat \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen2.5:3b-instruct","messages":[{"role":"user","content":"hi"}],"stream":false}'
+```
+
 ## OCR prerequisites
 - Установить Tesseract:
 ```bash

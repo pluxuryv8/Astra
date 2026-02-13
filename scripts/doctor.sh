@@ -122,6 +122,30 @@ PY
     fi
   fi
 
+  if [ -n "$OLLAMA_TAGS" ] && [ -n "$PYTHON_BIN" ]; then
+    CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:3b-instruct}"
+    CHAT_PAYLOAD=$($PYTHON_BIN - <<PY
+import json
+print(json.dumps({
+  "model": "${CHAT_MODEL}",
+  "messages": [{"role": "user", "content": "hi"}],
+  "stream": False
+}))
+PY
+)
+    CHAT_TMP=$(mktemp)
+    CHAT_STATUS=$(curl -s -o "$CHAT_TMP" -w "%{http_code}" --max-time 5 \
+      -H "Content-Type: application/json" \
+      -d "$CHAT_PAYLOAD" \
+      "${OLLAMA_BASE}/api/chat" || true)
+    if [ "$CHAT_STATUS" = "200" ]; then
+      ok "Local LLM chat ok (${CHAT_MODEL})"
+    else
+      fail "Local LLM chat failed (${CHAT_MODEL}) status=${CHAT_STATUS}. Check ${OLLAMA_BASE}/api/chat"
+    fi
+    rm -f "$CHAT_TMP" >/dev/null 2>&1 || true
+  fi
+
   # Cloud key check
   CLOUD_ENABLED="${ASTRA_CLOUD_ENABLED:-true}"
   if [[ "$CLOUD_ENABLED" =~ ^(0|false|no|off)$ ]]; then
