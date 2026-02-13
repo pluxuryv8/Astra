@@ -38,6 +38,7 @@
         "llm_request_succeeded",
         "llm_request_sanitized",
         "llm_route_decided",
+        "local_llm_http_error",
         "memory_deleted",
         "memory_list_viewed",
         "memory_save_requested",

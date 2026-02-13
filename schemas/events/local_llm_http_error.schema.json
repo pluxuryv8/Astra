@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schemas/events/local_llm_http_error.schema.json",
+  "title": "local_llm_http_error",
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "model_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "artifact_path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "model_id",
+    "artifact_path"
+  ],
+  "additionalProperties": false
+}

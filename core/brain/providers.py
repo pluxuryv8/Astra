@@ -2,9 +2,98 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import requests
+
+from core.llm_routing import _redact_secrets
+
+_ROOT_DIR = Path(__file__).resolve().parents[2]
+_ARTIFACT_DIR = _ROOT_DIR / "artifacts" / "local_llm_failures"
+_MAX_PAYLOAD_CHARS = 5000
+
+
+def _truncate(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars]
+
+
+def _sanitize_value(value: Any, max_chars: int) -> Any:
+    if isinstance(value, str):
+        redacted, _ = _redact_secrets(value)
+        return _truncate(redacted, max_chars)
+    if isinstance(value, dict):
+        return {key: _sanitize_value(item, max_chars) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_sanitize_value(item, max_chars) for item in value]
+    return value
+
+
+def _normalize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for message in messages:
+        role = message.get("role", "user")
+        content = message.get("content", "")
+        if not isinstance(content, str):
+            try:
+                content = json.dumps(content, ensure_ascii=False)
+            except Exception:
+                content = str(content)
+        normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _normalize_json_schema(schema: dict | None) -> dict | None:
+    if not schema:
+        return None
+    if isinstance(schema, dict) and "schema" in schema and isinstance(schema.get("schema"), dict):
+        return schema.get("schema")
+    if isinstance(schema, dict) and "type" in schema:
+        return schema
+    return None
+
+
+def _write_failure_artifact(
+    *,
+    payload: dict[str, Any],
+    response_status: int | None,
+    response_text: str | None,
+    run_id: str | None,
+    step_id: str | None,
+    model: str,
+    purpose: str | None,
+    variant: str,
+) -> str:
+    _ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    safe_run = run_id or "unknown"
+    safe_step = step_id or "unknown"
+    filename = f"{ts}_{safe_run}_{safe_step}_{variant}.json"
+    path = _ARTIFACT_DIR / filename
+
+    artifact = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_id,
+        "step_id": step_id,
+        "purpose": purpose,
+        "model": model,
+        "variant": variant,
+        "request_payload": _sanitize_value(payload, _MAX_PAYLOAD_CHARS),
+        "response_status": response_status,
+        "response_text": _truncate(_sanitize_value(response_text or "", _MAX_PAYLOAD_CHARS), _MAX_PAYLOAD_CHARS),
+    }
+    try:
+        path.write_text(json.dumps(artifact, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        # Best-effort logging; avoid breaking provider flow.
+        return str(path)
+    try:
+        return str(path.relative_to(_ROOT_DIR))
+    except ValueError:
+        return str(path)
 
 
 @dataclass
@@ -15,11 +104,20 @@ class ProviderResult:
 
 
 class ProviderError(RuntimeError):
-    def __init__(self, message: str, *, provider: str, status_code: int | None = None, error_type: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str,
+        status_code: int | None = None,
+        error_type: str | None = None,
+        artifact_path: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.provider = provider
         self.status_code = status_code
         self.error_type = error_type or "provider_error"
+        self.artifact_path = artifact_path
 
 
 class LocalLLMProvider:
@@ -38,11 +136,15 @@ class LocalLLMProvider:
         max_tokens: int | None = None,
         json_schema: dict | None = None,
         tools: list[dict] | None = None,
+        run_id: str | None = None,
+        step_id: str | None = None,
+        purpose: str | None = None,
     ) -> ProviderResult:
         model = self.code_model if model_kind == "code" else self.chat_model
+        normalized_messages = _normalize_messages(messages)
         payload: dict[str, Any] = {
             "model": model,
-            "messages": messages,
+            "messages": normalized_messages,
             "stream": False,
             "options": {
                 "temperature": temperature,
@@ -51,9 +153,11 @@ class LocalLLMProvider:
         if max_tokens is not None:
             payload["options"]["num_predict"] = int(max_tokens)
 
-        if json_schema or tools:
-            payload["tools"] = tools or []
-            payload["format"] = json_schema if json_schema else None
+        schema = _normalize_json_schema(json_schema)
+        if schema:
+            payload["format"] = schema
+        if tools:
+            payload["tools"] = tools
 
         try:
             resp = requests.post(
@@ -64,12 +168,90 @@ class LocalLLMProvider:
         except requests.RequestException as exc:
             raise ProviderError(f"Local LLM request failed: {exc}", provider="local", error_type="connection_error") from exc
 
+        if resp.status_code >= 500:
+            artifact_path = _write_failure_artifact(
+                payload=payload,
+                response_status=resp.status_code,
+                response_text=resp.text,
+                run_id=run_id,
+                step_id=step_id,
+                model=model,
+                purpose=purpose,
+                variant="primary",
+            )
+            simplified_payload: dict[str, Any] = {
+                "model": model,
+                "messages": normalized_messages,
+                "stream": False,
+            }
+            try:
+                retry_resp = requests.post(
+                    f"{self.base_url}/api/chat",
+                    json=simplified_payload,
+                    timeout=self.timeout_s,
+                )
+            except requests.RequestException as exc:
+                raise ProviderError(
+                    f"Local LLM request failed: {exc}",
+                    provider="local",
+                    error_type="connection_error",
+                    artifact_path=artifact_path,
+                ) from exc
+            if retry_resp.status_code >= 400:
+                retry_artifact = _write_failure_artifact(
+                    payload=simplified_payload,
+                    response_status=retry_resp.status_code,
+                    response_text=retry_resp.text,
+                    run_id=run_id,
+                    step_id=step_id,
+                    model=model,
+                    purpose=purpose,
+                    variant="simplified",
+                )
+                raise ProviderError(
+                    f"Local LLM HTTP {retry_resp.status_code}",
+                    provider="local",
+                    status_code=retry_resp.status_code,
+                    error_type="http_error",
+                    artifact_path=retry_artifact or artifact_path,
+                )
+            try:
+                data = retry_resp.json()
+            except json.JSONDecodeError as exc:
+                raise ProviderError(
+                    "Local LLM returned invalid JSON",
+                    provider="local",
+                    status_code=retry_resp.status_code,
+                    error_type="invalid_json",
+                    artifact_path=artifact_path,
+                ) from exc
+
+            message = data.get("message") or {}
+            text = message.get("content") or ""
+            usage = {
+                "prompt_eval_count": data.get("prompt_eval_count"),
+                "eval_count": data.get("eval_count"),
+                "total_duration": data.get("total_duration"),
+            }
+            return ProviderResult(text=text, usage=usage, raw=data)
+
         if resp.status_code >= 400:
+            artifact_path = _write_failure_artifact(
+                payload=payload,
+                response_status=resp.status_code,
+                response_text=resp.text,
+                run_id=run_id,
+                step_id=step_id,
+                model=model,
+                purpose=purpose,
+                variant="primary",
+            )
             raise ProviderError(
                 f"Local LLM HTTP {resp.status_code}",
                 provider="local",
                 status_code=resp.status_code,
                 error_type="http_error",
+                artifact_path=artifact_path,
             )
 
         try:

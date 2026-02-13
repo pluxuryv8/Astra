@@ -364,6 +364,19 @@ class BrainRouter:
                 task_id=task_id,
                 step_id=step_id,
             )
+            if exc.provider == "local" and exc.artifact_path:
+                self._emit(
+                    run_id,
+                    "local_llm_http_error",
+                    "Local LLM HTTP error",
+                    {
+                        "status": exc.status_code,
+                        "model_id": model_id,
+                        "artifact_path": exc.artifact_path,
+                    },
+                    task_id=task_id,
+                    step_id=step_id,
+                )
             if route == ROUTE_LOCAL:
                 self._note_local_failure(run_id, request.preferred_model_kind)
             raise
@@ -383,6 +396,9 @@ class BrainRouter:
             max_tokens=request.max_tokens,
             json_schema=request.json_schema,
             tools=request.tools,
+            run_id=request.run_id,
+            step_id=request.step_id,
+            purpose=request.purpose,
         )
 
     def _call_cloud_with_retry(self, messages: list[dict[str, Any]], request: LLMRequest, model_id: str, start: float) -> LLMResponse:
