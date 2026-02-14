@@ -21,8 +21,18 @@ let sessionToken: string | null = null;
 
 type OpenAIStoreResponse = StatusResponse & { stored?: boolean };
 
-export async function checkPermissions(): Promise<{ screen_recording: boolean; accessibility: boolean; message: string }> {
-  return (await invoke("check_permissions")) as { screen_recording: boolean; accessibility: boolean; message: string };
+export async function checkPermissions(): Promise<{
+  screen_recording: "granted" | "denied" | "unknown";
+  accessibility: "granted" | "denied" | "unknown";
+  input_control?: "available" | "blocked" | "unknown";
+  message: string;
+}> {
+  return (await invoke("check_permissions")) as {
+    screen_recording: "granted" | "denied" | "unknown";
+    accessibility: "granted" | "denied" | "unknown";
+    input_control?: "available" | "blocked" | "unknown";
+    message: string;
+  };
 }
 
 function getOrCreateSessionToken(): string {

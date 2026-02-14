@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "properties": {
+    "scenario_id": {"type": "string"},
+    "max_width": {"type": "integer"},
+    "quality": {"type": "integer"},
+    "scroll_dy": {"type": "integer"}
+  }
+}

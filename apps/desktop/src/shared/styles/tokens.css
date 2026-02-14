@@ -1,0 +1,53 @@
+:root {
+  color-scheme: dark;
+
+  --bg: #0b0b0c;
+  --surface: #111114;
+  --surface-2: #15161a;
+  --surface-3: #1b1c21;
+  --elevated: #22232a;
+  --border: #1f2026;
+  --border-soft: #17181d;
+  --text: #f3f3f4;
+  --text-muted: #b5b7bd;
+  --text-subtle: #7f828a;
+
+  --accent: #e4e5ea;
+  --accent-soft: #cfd1d7;
+  --accent-blue: #9fb2ee;
+  --accent-teal: #9ccfc3;
+  --accent-amber: #d8c89c;
+  --success: #9fd5b8;
+  --warning: #e0c796;
+  --danger: #e1a5a5;
+
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius-md: 12px;
+  --radius-lg: 14px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+
+  --shadow-soft: 0 24px 50px rgba(0, 0, 0, 0.35);
+  --shadow-panel: 0 18px 40px rgba(0, 0, 0, 0.3);
+  --shadow-focus: 0 0 0 2px rgba(255, 255, 255, 0.08);
+
+  --motion-fast: 140ms;
+  --motion-medium: 220ms;
+  --motion-slow: 320ms;
+
+  --grain-opacity: 0.05;
+  --grain-size: 3px;
+
+  --sidebar-width: 300px;
+  --sidebar-width-collapsed: 72px;
+  --activity-width: 320px;
+  --activity-width-collapsed: 72px;
+}

@@ -7,10 +7,8 @@ mod autopilot;
 mod skills;
 mod macos_main_queue;
 
-use std::sync::Mutex;
-use tauri::{
-    GlobalShortcutManager, Manager, PhysicalPosition, WindowBuilder, WindowUrl,
-};
+use std::{fs, path::PathBuf, sync::Mutex};
+use tauri::{Manager, PhysicalPosition, WindowBuilder, WindowUrl};
 
 struct OverlayState {
     mode: Mutex<String>,
@@ -33,7 +31,7 @@ fn open_settings_window(app: tauri::AppHandle) -> Result<(), String> {
     .min_inner_size(820.0, 520.0)
     .resizable(true)
     .decorations(true)
-    .transparent(true)
+    .transparent(false)
     .always_on_top(false)
     .build()
     .map(|_| ())
@@ -50,8 +48,8 @@ fn ensure_overlay_window(app: &tauri::AppHandle) -> Result<tauri::Window, String
         WindowUrl::App("index.html?view=overlay".into()),
     )
     .title("Astra Overlay")
-    .inner_size(360.0, 64.0)
-    .resizable(false)
+    .inner_size(420.0, 220.0)
+    .resizable(true)
     .decorations(false)
     .transparent(true)
     .always_on_top(true)
@@ -95,6 +93,39 @@ fn toggle_overlay_window(app: &tauri::AppHandle) -> Result<(), String> {
         win.show().map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn read_auth_token() -> Option<String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(data_dir) = std::env::var("ASTRA_DATA_DIR") {
+        candidates.push(PathBuf::from(data_dir).join("auth.token"));
+    }
+    if let Ok(base_dir) = std::env::var("ASTRA_BASE_DIR") {
+        candidates.push(PathBuf::from(base_dir).join(".astra").join("auth.token"));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(PathBuf::from(home).join(".astra").join("auth.token"));
+    }
+    if let Ok(mut dir) = std::env::current_dir() {
+        for _ in 0..5 {
+            candidates.push(dir.join(".astra").join("auth.token"));
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+
+    for path in candidates {
+        if let Ok(content) = fs::read_to_string(&path) {
+            let token = content.trim();
+            if !token.is_empty() {
+                return Some(token.to_string());
+            }
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -143,28 +174,9 @@ fn main() {
             overlay_hide,
             overlay_toggle,
             overlay_set_mode,
+            read_auth_token,
             open_main_window
         ])
-        .setup(|app| {
-            let handle = app.handle();
-            let mut shortcut_manager = handle.global_shortcut_manager();
-            let _ = shortcut_manager.register("Cmd+Shift+S", move || {
-                let _ = handle.emit_all("autopilot_stop_hotkey", {});
-            });
-            let handle_toggle = app.handle();
-            let _ = shortcut_manager.register("Cmd+Shift+O", move || {
-                let _ = toggle_overlay_window(&handle_toggle);
-            });
-            let handle_hide = app.handle();
-            let _ = shortcut_manager.register("Cmd+W", move || {
-                let _ = hide_overlay_window(&handle_hide);
-            });
-            let handle_quit = app.handle();
-            let _ = shortcut_manager.register("Cmd+Q", move || {
-                handle_quit.exit(0);
-            });
-            Ok(())
-        })
         .run(tauri::generate_context!())
         .expect("ошибка при запуске tauri-приложения");
 }

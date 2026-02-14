@@ -30,7 +30,10 @@ export default function SettingsApp() {
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [savingKey, setSavingKey] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<{ text: string; tone: "success" | "error" | "info" } | null>(null);
-  const [permissions, setPermissions] = useState<{ screen_recording?: boolean; accessibility?: boolean } | null>(null);
+  const [permissions, setPermissions] = useState<{
+    screen_recording?: "granted" | "denied" | "unknown";
+    accessibility?: "granted" | "denied" | "unknown";
+  } | null>(null);
   const [mode, setMode] = useState<string>(() => localStorage.getItem(RUN_MODE_KEY) || "execute_confirm");
 
   useEffect(() => {

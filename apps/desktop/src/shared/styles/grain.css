@@ -1,0 +1,23 @@
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    radial-gradient(rgba(255, 255, 255, var(--grain-opacity)) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, calc(var(--grain-opacity) * 0.6)) 1px, transparent 1px);
+  background-size: var(--grain-size) var(--grain-size), calc(var(--grain-size) * 2) calc(var(--grain-size) * 2);
+  background-position: 0 0, 1px 1px;
+  opacity: 1;
+  z-index: 0;
+  mix-blend-mode: soft-light;
+}
+
+body[data-grain="off"]::before {
+  opacity: 0;
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}

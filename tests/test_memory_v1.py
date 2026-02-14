@@ -26,9 +26,21 @@ def _make_client():
     _init_store(temp_dir)
     return TestClient(create_app())
 
+def _load_auth_token() -> str | None:
+    data_dir = Path(os.environ.get("ASTRA_DATA_DIR", ROOT / ".astra"))
+    token_path = data_dir / "auth.token"
+    if not token_path.exists():
+        return None
+    token = token_path.read_text(encoding="utf-8").strip()
+    return token or None
+
 
 def _bootstrap(client: TestClient, token: str = "test-token") -> dict:
-    client.post("/api/v1/auth/bootstrap", json={"token": token})
+    file_token = _load_auth_token()
+    token = file_token or token
+    res = client.post("/api/v1/auth/bootstrap", json={"token": token})
+    if res.status_code == 409 and file_token:
+        token = file_token
     return {"Authorization": f"Bearer {token}"}
 
 

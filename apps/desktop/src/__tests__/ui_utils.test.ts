@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mergeEvents, statusTone } from "../ui/utils";
-import type { EventItem } from "../types";
+import { mergeEvents, statusTone } from "../legacy_ui/ui/utils";
+import type { EventItem } from "../legacy_ui/types";
 
 describe("mergeEvents", () => {
   it("deduplicates by seq and preserves order", () => {

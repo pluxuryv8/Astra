@@ -2,7 +2,7 @@ use std::env;
 use std::thread;
 
 use serde::{Deserialize, Serialize};
-use tiny_http::{Response, Server};
+use tiny_http::{Header, Method, Response, Server};
 
 #[cfg(feature = "desktop-skills")]
 use crate::skills::{computer::ComputerControl, computer::ComputerAction, shell::BashExecutor};
@@ -78,6 +78,12 @@ pub fn start_bridge() {
             let _ = request.as_reader().read_to_string(&mut body);
             let path = request.url().to_string();
 
+            if request.method() == &Method::Options {
+                let response = with_cors(Response::from_string("OK").with_status_code(200));
+                let _ = request.respond(response);
+                continue;
+            }
+
             let response = match (request.method().as_str(), path.as_str()) {
                 // EN kept: стабильные пути API для desktop-bridge
                 ("POST", "/computer/preview") => handle_computer_preview(&body),
@@ -89,9 +95,20 @@ pub fn start_bridge() {
                 ("GET", "/autopilot/permissions") => handle_autopilot_permissions(),
                 _ => Response::from_string("не найдено").with_status_code(404),
             };
-            let _ = request.respond(response);
+            let _ = request.respond(with_cors(response));
         }
     });
+}
+
+fn with_cors(response: Response<std::io::Cursor<Vec<u8>>>) -> Response<std::io::Cursor<Vec<u8>>> {
+    response
+        .with_header(Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap())
+        .with_header(
+            Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, OPTIONS").unwrap(),
+        )
+        .with_header(
+            Header::from_bytes("Access-Control-Allow-Headers", "Content-Type, Authorization").unwrap(),
+        )
 }
 
 fn handle_computer_preview(body: &str) -> Response<std::io::Cursor<Vec<u8>>> {

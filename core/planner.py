@@ -22,6 +22,7 @@ KIND_FILE_ORGANIZE = "FILE_ORGANIZE"
 KIND_CODE_ASSIST = "CODE_ASSIST"
 KIND_MEMORY_COMMIT = "MEMORY_COMMIT"
 KIND_REMINDER_CREATE = "REMINDER_CREATE"
+KIND_SMOKE_RUN = "SMOKE_RUN"
 
 ALL_KINDS = {
     KIND_CHAT_RESPONSE,
@@ -33,6 +34,7 @@ ALL_KINDS = {
     KIND_CODE_ASSIST,
     KIND_MEMORY_COMMIT,
     KIND_REMINDER_CREATE,
+    KIND_SMOKE_RUN,
 }
 
 KIND_TO_SKILL = {
@@ -45,6 +47,7 @@ KIND_TO_SKILL = {
     KIND_CODE_ASSIST: "autopilot_computer",
     KIND_MEMORY_COMMIT: "memory_save",
     KIND_REMINDER_CREATE: "reminder_create",
+    KIND_SMOKE_RUN: "smoke_run",
 }
 
 DANGER_PATTERNS = {
@@ -104,6 +107,36 @@ def _id() -> str:
 
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.strip().lower())
+
+
+def _is_smoke_query(text: str) -> bool:
+    normalized = _normalize(text)
+    return normalized.startswith("s_smoke_1") or normalized.startswith("__smoke__") or "s_smoke_1" in normalized
+
+
+def _build_smoke_plan(query_text: str) -> list[PlanStep]:
+    steps = [
+        _step(
+            0,
+            "Smoke: наблюдение и безопасные действия",
+            KIND_SMOKE_RUN,
+            {"scenario_id": "S_SMOKE_1"},
+            "Скриншоты получены и проверено изменение экрана",
+        ),
+        _step(
+            1,
+            "Демонстрация safety: удалить test.txt на рабочем столе",
+            KIND_COMPUTER_ACTIONS,
+            _autopilot_inputs(
+                "Удалить файл test.txt на рабочем столе (демо безопасности, требуется подтверждение)",
+                ["Если файл отсутствует — остановиться и запросить подтверждение"],
+            ),
+            "Запрошено подтверждение на удаление файла",
+            danger_flags=["delete_file"],
+            depends_on=[0],
+        ),
+    ]
+    return steps
 
 
 def _contains_any(text: str, phrases: tuple[str, ...]) -> bool:
@@ -576,9 +609,11 @@ def _sanitize_plan_inputs(steps: list[PlanStep], fallback_goal: str) -> None:
             content = raw.get("content") if isinstance(raw.get("content"), str) else ""
             title = raw.get("title") if isinstance(raw.get("title"), str) else ""
             tags = raw.get("tags") if isinstance(raw.get("tags"), list) else []
-            cleaned = {}
-            if content:
-                cleaned["content"] = content
+            if not content:
+                content = fallback_goal.strip() if isinstance(fallback_goal, str) else ""
+            if not content:
+                content = step.title or "Запись пользователя"
+            cleaned: dict[str, Any] = {"content": content}
             if title:
                 cleaned["title"] = title
             if tags:
@@ -803,6 +838,9 @@ def create_plan_for_run(run: dict) -> list[dict]:
     query_text = run.get("query_text", "")
     meta = run.get("meta") or {}
     intent = meta.get("intent")
+
+    if _is_smoke_query(query_text):
+        return [step.to_dict() for step in _build_smoke_plan(query_text)]
 
     if intent == INTENT_ASK:
         return []

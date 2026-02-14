@@ -16,6 +16,9 @@
       "shell": {
         "open": true
       },
+      "fs": {
+        "all": true
+      },
       "globalShortcut": {
         "all": true
       },
@@ -29,9 +32,9 @@
         "width": 520,
         "height": 360,
         "resizable": true,
-        "transparent": true,
-        "decorations": false,
-        "alwaysOnTop": true,
+        "transparent": false,
+        "decorations": true,
+        "alwaysOnTop": false,
         "minWidth": 420,
         "minHeight": 240,
         "skipTaskbar": false

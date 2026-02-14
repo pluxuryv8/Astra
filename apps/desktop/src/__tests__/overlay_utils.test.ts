@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { deriveOverlayStatus } from "../ui/overlay_utils";
+import { deriveOverlayStatus } from "../legacy_ui/ui/overlay_utils";
 
 describe("deriveOverlayStatus", () => {
   it("prioritizes approvals", () => {

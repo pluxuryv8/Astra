@@ -72,6 +72,14 @@ Randarc-Astra — локальная станция, которая запуск
 ./scripts/run.sh
 ```
 
+Запуск одной командой:
+```bash
+./scripts/astra dev
+./scripts/astra status
+./scripts/astra doctor
+./scripts/astra stop
+```
+
 Остановка:
 ```bash
 ./scripts/stop.sh

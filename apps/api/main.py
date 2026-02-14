@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.config import load_settings
+from apps.api.auth import ensure_session_token
 from apps.api.routes import (
     artifacts,
     auth,
@@ -37,6 +38,7 @@ def create_app() -> FastAPI:
     )
 
     store.init(settings.data_dir, settings.base_dir / "memory" / "migrations")
+    ensure_session_token(settings.data_dir)
 
     app.state.engine = RunEngine(settings.base_dir)
     app.state.base_dir = settings.base_dir

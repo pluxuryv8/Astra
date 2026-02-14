@@ -17,6 +17,8 @@ if [ -f ".env" ]; then
   set +a
 fi
 
+export ASTRA_AUTH_MODE="${ASTRA_AUTH_MODE:-local}"
+
 if ! command -v node >/dev/null 2>&1; then
   echo "Нужен Node.js (node). Установи Node и повтори запуск." >&2
   exit 1
@@ -62,8 +64,13 @@ npm --prefix apps/desktop install >/dev/null
 
 API_PORT="${ASTRA_API_PORT:-8055}"
 export ASTRA_API_PORT="$API_PORT"
+if [ -z "${ASTRA_DATA_DIR:-}" ]; then
+  export ASTRA_DATA_DIR="$ROOT_DIR/.astra"
+fi
+export VITE_ASTRA_BASE_DIR="$ROOT_DIR"
+export VITE_ASTRA_DATA_DIR="$ASTRA_DATA_DIR"
 
-LOG_DIR=".astra/logs"
+LOG_DIR="${ASTRA_LOG_DIR:-.astra/logs}"
 mkdir -p "$LOG_DIR"
 PUBLIC_LOG_LINK="logs"
 

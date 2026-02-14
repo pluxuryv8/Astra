@@ -5,7 +5,7 @@ type SettingsPanelProps = {
   onOpenaiKeyChange: (value: string) => void;
   keyStored: boolean;
   apiAvailable: boolean | null;
-  permissions: { screen_recording?: boolean; accessibility?: boolean } | null;
+  permissions: { screen_recording?: "granted" | "denied" | "unknown"; accessibility?: "granted" | "denied" | "unknown" } | null;
   mode: string;
   modeOptions: { value: string; label: string }[];
   onModeChange: (value: string) => void;
@@ -101,14 +101,14 @@ export default function SettingsPanel({
         <div className="section-title">Разрешения macOS</div>
         <div className="settings-perm">
           <span>Запись экрана</span>
-          <span className={permissions?.screen_recording ? "perm-on" : "perm-off"}>
-            {permissions?.screen_recording ? "включено" : "не включено"}
+          <span className={permissions?.screen_recording === "granted" ? "perm-on" : "perm-off"}>
+            {permissions?.screen_recording === "granted" ? "включено" : "не включено"}
           </span>
         </div>
         <div className="settings-perm">
           <span>Универсальный доступ</span>
-          <span className={permissions?.accessibility ? "perm-on" : "perm-off"}>
-            {permissions?.accessibility ? "включено" : "не включено"}
+          <span className={permissions?.accessibility === "granted" ? "perm-on" : "perm-off"}>
+            {permissions?.accessibility === "granted" ? "включено" : "не включено"}
           </span>
         </div>
         <button className="btn ghost" onClick={onRefreshPermissions}>

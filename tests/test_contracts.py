@@ -25,9 +25,21 @@ def make_client() -> TestClient:
     store.reset_for_tests()
     return TestClient(create_app())
 
+def _load_auth_token() -> str | None:
+    data_dir = Path(os.environ.get("ASTRA_DATA_DIR", ROOT / ".astra"))
+    token_path = data_dir / "auth.token"
+    if not token_path.exists():
+        return None
+    token = token_path.read_text(encoding="utf-8").strip()
+    return token or None
+
 
 def bootstrap(client: TestClient, token: str = "test-token") -> dict:
-    client.post("/api/v1/auth/bootstrap", json={"token": token})
+    file_token = _load_auth_token()
+    token = file_token or token
+    res = client.post("/api/v1/auth/bootstrap", json={"token": token})
+    if res.status_code == 409 and file_token:
+        token = file_token
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -54,6 +66,11 @@ def parse_sse_events(text: str) -> list[dict]:
                 except json.JSONDecodeError:
                     continue
     return events
+
+
+def _auth_token_from_headers(headers: dict) -> str:
+    auth = headers.get("Authorization", "")
+    return auth.replace("Bearer ", "", 1).strip()
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -109,6 +126,7 @@ def test_snapshot_contract():
 def test_event_contract_from_sse():
     client = make_client()
     headers = bootstrap(client)
+    token = _auth_token_from_headers(headers)
 
     project = client.post("/api/v1/projects", json={"name": "Events", "tags": [], "settings": {}}, headers=headers).json()
     run = client.post(
@@ -118,7 +136,7 @@ def test_event_contract_from_sse():
     ).json()
     run = unwrap_run(run)
 
-    res = client.get(f"/api/v1/runs/{run['id']}/events?token=test-token&once=1")
+    res = client.get(f"/api/v1/runs/{run['id']}/events?token={token}&once=1")
     assert res.status_code == 200
     events = parse_sse_events(res.text)
     assert events, "SSE не вернул событий"
@@ -134,6 +152,7 @@ def test_approval_resolved_event():
 
     client = make_client()
     headers = bootstrap(client, token="test-token")
+    token = _auth_token_from_headers(headers)
 
     project = client.post("/api/v1/projects", json={"name": "Approvals", "tags": [], "settings": {}}, headers=headers).json()
     run = client.post(
@@ -172,7 +191,7 @@ def test_approval_resolved_event():
     client.post(f"/api/v1/approvals/{approval_id}/approve", headers=headers)
 
     time.sleep(0.5)
-    events_res = client.get(f"/api/v1/runs/{run['id']}/events/download?token=test-token")
+    events_res = client.get(f"/api/v1/runs/{run['id']}/events/download?token={token}")
     assert events_res.status_code == 200
 
     events = [json.loads(line) for line in events_res.text.splitlines() if line.strip()]

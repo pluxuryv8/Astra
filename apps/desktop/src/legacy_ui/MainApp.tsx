@@ -137,9 +137,13 @@ const STATUS_LABELS: Record<string, string> = {
   canceled: "Отменено"
 };
 
+type PermissionState = "granted" | "denied" | "unknown";
+type InputState = "available" | "blocked" | "unknown";
+
 type PermissionsStatus = {
-  screen_recording?: boolean;
-  accessibility?: boolean;
+  screen_recording?: PermissionState;
+  accessibility?: PermissionState;
+  input_control?: InputState;
   message?: string;
 };
 
