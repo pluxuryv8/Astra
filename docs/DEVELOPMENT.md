@@ -3,7 +3,6 @@
 ## Local run
 
 ```bash
-cp .env.example .env
 ./scripts/astra dev
 ```
 

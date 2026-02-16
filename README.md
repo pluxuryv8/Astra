@@ -25,7 +25,6 @@ Randarc Astra — локальный desktop-ассистент с UI на `Taur
 ### 2) Установка и запуск
 
 ```bash
-cp .env.example .env
 ./scripts/astra dev
 ```
 
