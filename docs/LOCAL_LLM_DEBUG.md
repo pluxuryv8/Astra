@@ -37,7 +37,7 @@ python3 scripts/replicate_ollama_request.py artifacts/local_llm_failures/<file>.
 curl -s http://127.0.0.1:11434/api/tags
 curl -s -X POST http://127.0.0.1:11434/api/chat \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5:3b-instruct","messages":[{"role":"user","content":"hi"}],"stream":false}'
+  -d '{"model":"saiga-nemo-12b","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
 
 Если базовый `curl` работает, а payload из артефакта падает — проблема в формате запроса (см. выше).

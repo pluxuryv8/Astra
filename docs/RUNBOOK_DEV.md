@@ -8,6 +8,13 @@
 ```
 (см. `scripts/run.sh:1-134`, `scripts/doctor.sh:1-200`)
 
+## Install models
+```bash
+./scripts/models.sh install
+./scripts/run.sh
+./scripts/doctor.sh prereq
+```
+
 Остановка:
 ```bash
 ./scripts/stop.sh
@@ -41,7 +48,7 @@ Sanity-check:
 curl -s http://127.0.0.1:11434/api/tags
 curl -s -X POST http://127.0.0.1:11434/api/chat \
   -H 'Content-Type: application/json' \
-  -d '{"model":"qwen2.5:3b-instruct","messages":[{"role":"user","content":"hi"}],"stream":false}'
+  -d '{"model":"saiga-nemo-12b","messages":[{"role":"user","content":"hi"}],"stream":false}'
 ```
 
 ## OCR prerequisites

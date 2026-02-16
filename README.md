@@ -72,6 +72,13 @@ Randarc-Astra — локальная станция, которая запуск
 ./scripts/run.sh
 ```
 
+Установка моделей (Ollama):
+```bash
+./scripts/models.sh install
+./scripts/run.sh
+./scripts/doctor.sh prereq
+```
+
 Запуск одной командой:
 ```bash
 ./scripts/astra dev
