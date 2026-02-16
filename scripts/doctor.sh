@@ -67,7 +67,7 @@ check_prereq() {
 
   # Env presence (no values)
   CLOUD_ENABLED="${ASTRA_CLOUD_ENABLED:-false}"
-  for var in ASTRA_API_BASE_URL ASTRA_API_PORT ASTRA_BRIDGE_BASE_URL ASTRA_BRIDGE_PORT ASTRA_DESKTOP_BRIDGE_PORT ASTRA_BASE_DIR ASTRA_DATA_DIR ASTRA_VAULT_PATH ASTRA_VAULT_PASSPHRASE ASTRA_LOCAL_SECRETS_PATH OPENAI_API_KEY ASTRA_SESSION_TOKEN ASTRA_LLM_LOCAL_BASE_URL ASTRA_LLM_LOCAL_CHAT_MODEL ASTRA_LLM_LOCAL_CODE_MODEL ASTRA_LLM_CLOUD_MODEL ASTRA_CLOUD_ENABLED ASTRA_AUTO_CLOUD_ENABLED ASTRA_LLM_MAX_CONCURRENCY ASTRA_LLM_MAX_RETRIES ASTRA_LLM_BACKOFF_BASE_MS ASTRA_LLM_BUDGET_PER_RUN ASTRA_LLM_BUDGET_PER_STEP ASTRA_REMINDERS_ENABLED ASTRA_TIMEZONE TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID ASTRA_SAIGA_GGUF_URL; do
+  for var in ASTRA_API_BASE_URL ASTRA_API_PORT ASTRA_BRIDGE_BASE_URL ASTRA_BRIDGE_PORT ASTRA_DESKTOP_BRIDGE_PORT ASTRA_BASE_DIR ASTRA_DATA_DIR ASTRA_VAULT_PATH ASTRA_VAULT_PASSPHRASE ASTRA_LOCAL_SECRETS_PATH OPENAI_API_KEY ASTRA_SESSION_TOKEN ASTRA_LLM_LOCAL_BASE_URL ASTRA_LLM_LOCAL_CHAT_MODEL ASTRA_LLM_LOCAL_CHAT_MODEL_FAST ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX ASTRA_LLM_LOCAL_CODE_MODEL ASTRA_LLM_CLOUD_MODEL ASTRA_CLOUD_ENABLED ASTRA_AUTO_CLOUD_ENABLED ASTRA_LLM_MAX_CONCURRENCY ASTRA_LLM_MAX_RETRIES ASTRA_LLM_BACKOFF_BASE_MS ASTRA_LLM_BUDGET_PER_RUN ASTRA_LLM_BUDGET_PER_STEP ASTRA_REMINDERS_ENABLED ASTRA_TIMEZONE TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
     if [ "$var" = "OPENAI_API_KEY" ] && [[ "$CLOUD_ENABLED" =~ ^(0|false|no|off)$ ]]; then
       continue
     fi
@@ -114,7 +114,9 @@ PY
   fi
 
   if [ -n "$OLLAMA_TAGS" ] && [ -n "$PYTHON_BIN" ]; then
-    REQ_CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-saiga-nemo-12b}"
+    REQ_CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:7b-instruct}"
+    REQ_CHAT_FAST_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_FAST:-qwen2.5:3b-instruct}"
+    REQ_CHAT_COMPLEX_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX:-$REQ_CHAT_MODEL}"
     REQ_CODE_MODEL="${ASTRA_LLM_LOCAL_CODE_MODEL:-deepseek-coder-v2:16b-lite-instruct-q8_0}"
     MISSING_MODELS=$($PYTHON_BIN - <<PY
 import json
@@ -126,21 +128,21 @@ models={m.get('name') for m in data.get('models', []) if isinstance(m, dict)}
 missing=[]
 def normalize(name):
     return name if ":" in name else f"{name}:latest"
-for name in ["$REQ_CHAT_MODEL","$REQ_CODE_MODEL"]:
+for name in ["$REQ_CHAT_MODEL","$REQ_CHAT_FAST_MODEL","$REQ_CHAT_COMPLEX_MODEL","$REQ_CODE_MODEL"]:
     if name and name not in models and normalize(name) not in models:
         missing.append(name)
 print(",".join(missing))
 PY
 )
     if [ -z "$MISSING_MODELS" ]; then
-      ok "Ollama models present (${REQ_CHAT_MODEL}, ${REQ_CODE_MODEL})"
+      ok "Ollama models present (${REQ_CHAT_MODEL}, ${REQ_CHAT_FAST_MODEL}, ${REQ_CHAT_COMPLEX_MODEL}, ${REQ_CODE_MODEL})"
     else
       fail "Ollama missing models: ${MISSING_MODELS}. Install: ./scripts/models.sh install"
     fi
   fi
 
   if [ -n "$OLLAMA_TAGS" ] && [ -n "$PYTHON_BIN" ]; then
-    CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-saiga-nemo-12b}"
+    CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:7b-instruct}"
     CHAT_MODEL_TEST="$CHAT_MODEL"
     if [[ "$CHAT_MODEL_TEST" != *:* ]]; then
       CHAT_MODEL_TEST="${CHAT_MODEL_TEST}:latest"
@@ -313,15 +315,13 @@ PY
         -X POST "${API_BASE_URL}/projects" \
         -d '{"name":"doctor","tags":["doctor"],"settings":{}}' || true)
       if [ -n "$PROJECT_JSON" ] && [ -n "$PYTHON_BIN" ]; then
-        PROJECT_ID=$($PYTHON_BIN - <<PY
-import json
+        PROJECT_ID=$("$PYTHON_BIN" -c 'import json,sys
+raw = sys.stdin.read()
 try:
-  data=json.loads("""$PROJECT_JSON""")
-  print(data.get("id",""))
+  data = json.loads(raw)
+  print(data.get("id","") if isinstance(data, dict) else "")
 except Exception:
-  print("")
-PY
-)
+  print("")' <<<"$PROJECT_JSON")
       fi
       if [ -n "$PROJECT_ID" ]; then
         ok "POST /projects"
@@ -335,19 +335,17 @@ PY
         -X POST "${API_BASE_URL}/projects/${PROJECT_ID}/runs" \
         -d '{"query_text":"doctor smoke","mode":"plan_only"}' || true)
       if [ -n "$RUN_JSON" ] && [ -n "$PYTHON_BIN" ]; then
-        RUN_ID=$($PYTHON_BIN - <<PY
-import json
+        RUN_ID=$("$PYTHON_BIN" -c 'import json,sys
+raw = sys.stdin.read()
 try:
-  data=json.loads("""$RUN_JSON""")
+  data = json.loads(raw)
   if isinstance(data, dict):
-    run=data.get("run") or {}
+    run = data.get("run") or {}
     print(run.get("id") or data.get("id") or "")
   else:
     print("")
 except Exception:
-  print("")
-PY
-)
+  print("")' <<<"$RUN_JSON")
       fi
       if [ -n "$RUN_ID" ]; then
         ok "POST /projects/{id}/runs"
