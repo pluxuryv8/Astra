@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { Loader2, Play, Copy } from "lucide-react";
+import { getBridgeBaseUrl } from "../shared/api/config";
 import Button from "../shared/ui/Button";
 import { apiBase, cancelRun, createProject, createRun, getSnapshot, listProjects, startRun } from "../shared/api/client";
 
@@ -13,12 +14,7 @@ type SmokeState = {
   hashChanged?: boolean | null;
 };
 
-const BRIDGE_PORT =
-  (import.meta.env as Record<string, string | undefined>).VITE_ASTRA_DESKTOP_BRIDGE_PORT ||
-  (import.meta.env as Record<string, string | undefined>).VITE_DESKTOP_BRIDGE_PORT ||
-  "43124";
-
-const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
+const BRIDGE_BASE = getBridgeBaseUrl();
 const SMOKE_QUERY =
   "S_SMOKE_1: Проверь локальный smoke-тест. Сделай наблюдение, безопасную прокрутку и остановись перед удалением test.txt.";
 

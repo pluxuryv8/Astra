@@ -36,6 +36,7 @@ import {
   regenerateToken,
   setLastError
 } from "../api/authController";
+import { PHRASES, nameFromMeta, withName } from "../assistantPhrases";
 
 const runService = createRunService();
 
@@ -68,6 +69,9 @@ const RUNS_LIMIT = 80;
 const POLL_INTERVAL_MS = 5000;
 const MESSAGE_LIMIT = 240;
 const CONVERSATION_LIMIT = 200;
+const NOTIFICATION_TTL_MS = 6000;
+const NOTIFICATION_TTL_WARNING_MS = 10000;
+const NOTIFICATION_TTL_ERROR_MS = 18000;
 
 const EVENT_TYPES = [
   "approval_approved",
@@ -253,27 +257,27 @@ function detailsFromEvents(events: EventItem[]): string[] {
     if (lines.length >= 3) break;
     switch (event.type) {
       case "plan_created":
-        lines.push("План сформирован, готовлю шаги.");
+        lines.push("Планирую.");
         break;
       case "step_execution_started":
       case "task_started":
-        lines.push("Запускаю следующий шаг.");
+        lines.push("Выполняю.");
         break;
       case "step_execution_finished":
       case "task_done":
-        lines.push("Шаг завершён, проверяю результат.");
+        lines.push("Шаг завершён.");
         break;
       case "approval_requested":
       case "step_paused_for_approval":
-        lines.push("Нужно подтверждение перед продолжением.");
+        lines.push(PHRASES.confirmDanger);
         break;
       case "run_failed":
       case "task_failed":
       case "llm_request_failed":
-        lines.push("Обнаружена ошибка, уточняю состояние.");
+        lines.push(PHRASES.error);
         break;
       case "run_done":
-        lines.push("Выполнение завершено. Подвожу итоги.");
+        lines.push(PHRASES.done);
         break;
       case "local_llm_http_error":
         lines.push("Ошибка локальной модели. Проверьте настройки.");
@@ -404,6 +408,12 @@ function ensureMessageLimit(messages: Message[]) {
 function getConversationById(conversations: ConversationSummary[], id: string | null) {
   if (!id) return null;
   return conversations.find((item) => item.id === id) || null;
+}
+
+function getConversationIdByRunId(conversations: ConversationSummary[], runId: string | null | undefined) {
+  if (!runId) return null;
+  const conversation = conversations.find((item) => item.run_ids.includes(runId));
+  return conversation ? conversation.id : null;
 }
 
 function nextConversationId(conversations: ConversationSummary[], activeId: string | null) {
@@ -537,6 +547,29 @@ const postedMarks = new Set<string>();
 let autoBootstrapAttempted = false;
 let pendingAuthRetry: (() => Promise<void>) | null = null;
 let reminderStatusCache = new Map<string, string>();
+const notificationTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function clearNotificationTimer(notificationId: string) {
+  const timer = notificationTimers.get(notificationId);
+  if (!timer) return;
+  clearTimeout(timer);
+  notificationTimers.delete(notificationId);
+}
+
+function clearAllNotificationTimers() {
+  notificationTimers.forEach((timer) => clearTimeout(timer));
+  notificationTimers.clear();
+}
+
+function notificationTtl(item: NotificationItem): number | null {
+  const text = `${item.title || ""} ${item.body || ""}`.toLowerCase();
+  if (text.includes("подтверждение") || text.includes("approval")) {
+    return null;
+  }
+  if (item.severity === "error") return NOTIFICATION_TTL_ERROR_MS;
+  if (item.severity === "warning") return NOTIFICATION_TTL_WARNING_MS;
+  return NOTIFICATION_TTL_MS;
+}
 
 function cleanupEventStream() {
   if (eventHandle) {
@@ -1138,6 +1171,26 @@ export const useAppStore = create<AppStore>((set, get) => {
               if (notification) {
                 get().addNotification(notification);
               }
+              if (event.type === "memory_saved") {
+                const key = `memory_saved:${event.id}`;
+                if (postedMarks.has(key)) return;
+                postedMarks.add(key);
+                const payload = event.payload || {};
+                const origin = typeof payload.origin === "string" ? payload.origin : "";
+                if (origin === "auto") return;
+                const conversationId =
+                  getConversationIdByRunId(get().conversations, event.run_id) || get().lastSelectedChatId;
+                if (!conversationId) return;
+                const title = typeof payload.title === "string" ? payload.title : "Запись сохранена";
+                appendMessage(conversationId, {
+                  id: createId("msg"),
+                  chat_id: conversationId,
+                  role: "astra",
+                  text: `Запомнил: ${title}`,
+                  ts: new Date().toISOString(),
+                  run_id: event.run_id
+                });
+              }
             });
             const result = mergeEvents(get().events, batch, EVENT_BUFFER_LIMIT);
             lastSeq = result.lastSeq;
@@ -1187,6 +1240,9 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({ conversations, lastSelectedChatId: conversationId });
         saveConversations(conversations);
       }
+      const currentConversation = getConversationById(get().conversations, conversationId);
+      const lastRunId = currentConversation?.run_ids.slice(-1)[0] || null;
+      const parentRunId = options?.parentRunId ?? lastRunId;
       const messageId = createId("msg");
       const createdAt = new Date().toISOString();
       appendMessage(conversationId, {
@@ -1202,7 +1258,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         const response = await runService.createRun(projectId, {
           query_text: query,
           mode: getRunMode(),
-          parent_run_id: options?.parentRunId || undefined
+          parent_run_id: parentRunId || undefined
         });
         if (!response.run) {
           throw new Error("Не удалось создать чат");
@@ -1228,31 +1284,35 @@ export const useAppStore = create<AppStore>((set, get) => {
 
         if (response.kind === "clarify") {
           const questions = response.questions?.filter(Boolean) || [];
+          const userName = nameFromMeta(run.meta);
           appendMessage(conversationId, {
             id: createId("msg"),
             chat_id: conversationId,
             role: "astra",
-            text: questions.join("\n") || "Нужны уточнения.",
+            text: withName(questions.join("\n") || PHRASES.clarifyFallback, userName),
             ts: new Date().toISOString(),
             run_id: run.id
           });
         }
         if (response.kind === "chat") {
+          const userName = nameFromMeta(run.meta);
+          const baseText = response.chat_response || PHRASES.chatFallback;
           appendMessage(conversationId, {
             id: createId("msg"),
             chat_id: conversationId,
             role: "astra",
-            text: response.chat_response || "Ответ готов.",
+            text: withName(baseText, userName),
             ts: new Date().toISOString(),
             run_id: run.id
           });
         }
         if (response.kind === "act") {
+          const userName = nameFromMeta(run.meta);
           appendMessage(conversationId, {
             id: createId("msg"),
             chat_id: conversationId,
             role: "astra",
-            text: "Запускаю выполнение. Статус — справа.",
+            text: withName(PHRASES.actStart, userName),
             ts: new Date().toISOString(),
             run_id: run.id
           });
@@ -1395,22 +1455,39 @@ export const useAppStore = create<AppStore>((set, get) => {
     setOverlayOpen: (value) => set({ overlayOpen: value }),
     setOverlayBehavior: (value) => set({ overlayBehavior: value }),
     setOverlayCorner: (value) => set({ overlayCorner: value }),
-    addNotification: (item) =>
+    addNotification: (item) => {
+      if (get().notifications.some((existing) => existing.id === item.id)) {
+        return;
+      }
       set((state) => {
-        if (state.notifications.some((existing) => existing.id === item.id)) {
-          return state;
-        }
         const next = [item, ...state.notifications].slice(0, 30);
         saveNotifications(next);
         return { notifications: next };
-      }),
-    dismissNotification: (id) =>
+      });
+      const ids = new Set(get().notifications.map((entry) => entry.id));
+      notificationTimers.forEach((_timer, id) => {
+        if (!ids.has(id)) {
+          clearNotificationTimer(id);
+        }
+      });
+      const ttl = notificationTtl(item);
+      clearNotificationTimer(item.id);
+      if (ttl === null) return;
+      const timer = setTimeout(() => {
+        get().dismissNotification(item.id);
+      }, ttl);
+      notificationTimers.set(item.id, timer);
+    },
+    dismissNotification: (id) => {
+      clearNotificationTimer(id);
       set((state) => {
         const next = state.notifications.filter((item) => item.id !== id);
         saveNotifications(next);
         return { notifications: next };
-      }),
+      });
+    },
     clearNotifications: () => {
+      clearAllNotificationTimers();
       saveNotifications([]);
       set({ notifications: [] });
     },

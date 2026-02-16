@@ -67,11 +67,51 @@ struct AutopilotActRequest {
     image_height: u32,
 }
 
+fn bridge_addr_from_base_url(base_url: &str) -> Option<String> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    let (scheme, without_scheme) = if let Some(value) = trimmed.strip_prefix("http://") {
+        ("http", value)
+    } else if let Some(value) = trimmed.strip_prefix("https://") {
+        ("https", value)
+    } else {
+        return None;
+    };
+
+    let host_port = without_scheme.split('/').next()?;
+    if host_port.is_empty() {
+        return None;
+    }
+
+    if host_port.contains(':') {
+        return Some(host_port.to_string());
+    }
+
+    let fallback_port = if scheme == "https" { 443 } else { 80 };
+    Some(format!("{}:{}", host_port, fallback_port))
+}
+
+fn resolve_bridge_addr() -> String {
+    if let Ok(base_url) = env::var("ASTRA_BRIDGE_BASE_URL") {
+        if let Some(addr) = bridge_addr_from_base_url(&base_url) {
+            return addr;
+        }
+        eprintln!(
+            "bridge: invalid ASTRA_BRIDGE_BASE_URL='{}', fallback to ASTRA_BRIDGE_PORT/ASTRA_DESKTOP_BRIDGE_PORT",
+            base_url
+        );
+    }
+
+    let port = env::var("ASTRA_BRIDGE_PORT")
+        .or_else(|_| env::var("ASTRA_DESKTOP_BRIDGE_PORT"))
+        .unwrap_or_else(|_| "43124".to_string());
+    format!("127.0.0.1:{}", port)
+}
+
 
 pub fn start_bridge() {
-    let port = env::var("ASTRA_DESKTOP_BRIDGE_PORT").unwrap_or_else(|_| "43124".to_string());
-    let addr = format!("127.0.0.1:{}", port);
+    let addr = resolve_bridge_addr();
     thread::spawn(move || {
+        eprintln!("desktop-bridge listening on http://{}", addr);
         let server = Server::http(&addr).expect("не удалось запустить bridge-сервер");
         for mut request in server.incoming_requests() {
             let mut body = String::new();

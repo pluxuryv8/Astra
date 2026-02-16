@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useMemo } from "react";
 import { X } from "lucide-react";
 import { useAppStore } from "../shared/store/appStore";
 import { cn } from "../shared/utils/cn";
@@ -13,46 +13,10 @@ type ToastItem = {
   severity?: "info" | "success" | "warning" | "error";
 };
 
-const TOAST_TTL = 6000;
-
 export default function NotificationToasts() {
   const notifications = useAppStore((state) => state.notifications);
-  const [toasts, setToasts] = useState<ToastItem[]>([]);
-  const seenRef = useRef<Set<string>>(new Set());
-  const timersRef = useRef<Map<string, number>>(new Map());
-
-  useEffect(() => {
-    const next: ToastItem[] = [];
-    notifications.forEach((item) => {
-      if (seenRef.current.has(item.id)) return;
-      seenRef.current.add(item.id);
-      next.push(item);
-    });
-    if (!next.length) return;
-    setToasts((prev) => [...next, ...prev].slice(0, 3));
-    next.forEach((item) => {
-      const timer = window.setTimeout(() => {
-        setToasts((prev) => prev.filter((toast) => toast.id !== item.id));
-      }, TOAST_TTL);
-      timersRef.current.set(item.id, timer);
-    });
-  }, [notifications]);
-
-  useEffect(() => {
-    const timers = timersRef.current;
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer));
-    };
-  }, []);
-
-  const dismiss = (id: string) => {
-    const timer = timersRef.current.get(id);
-    if (timer) {
-      window.clearTimeout(timer);
-      timersRef.current.delete(id);
-    }
-    setToasts((prev) => prev.filter((toast) => toast.id !== id));
-  };
+  const dismissNotification = useAppStore((state) => state.dismissNotification);
+  const toasts = useMemo<ToastItem[]>(() => notifications.slice(0, 3), [notifications]);
 
   if (!toasts.length) return null;
 
@@ -62,7 +26,7 @@ export default function NotificationToasts() {
         <div key={toast.id} className={cn("toast", toast.severity && `is-${toast.severity}`)}>
           <div className="toast-header">
             <div className="toast-title">{toast.title}</div>
-            <IconButton type="button" size="sm" aria-label="Скрыть" onClick={() => dismiss(toast.id)}>
+            <IconButton type="button" size="sm" aria-label="Скрыть" onClick={() => dismissNotification(toast.id)}>
               <X size={14} />
             </IconButton>
           </div>

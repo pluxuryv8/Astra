@@ -32,6 +32,7 @@ import SettingsPanel from "./ui/SettingsPanel";
 import MemoryPanel from "./ui/MemoryPanel";
 import RemindersPanel from "./ui/RemindersPanel";
 import { mergeEvents, statusTone } from "./ui/utils";
+import { PHRASES, nameFromMeta, withName } from "../shared/assistantPhrases";
 import type {
   Approval,
   EventItem,
@@ -578,20 +579,22 @@ export default function MainApp() {
       });
       return;
     }
+    const userName = nameFromMeta(response.run?.meta || null);
     if (response.kind === "clarify") {
       const questions = response.questions?.filter(Boolean) || [];
       appendMessage({
         id: nowId("assistant"),
         role: "assistant",
-        content: questions.join("\n") || "Нужны уточнения."
+        content: withName(questions.join("\n") || PHRASES.clarifyFallback, userName)
       });
       return;
     }
     if (response.kind === "chat") {
+      const baseText = response.chat_response || PHRASES.chatFallback;
       appendMessage({
         id: nowId("assistant"),
         role: "assistant",
-        content: response.chat_response || "Ответ готов."
+        content: withName(baseText, userName)
       });
       return;
     }
@@ -608,7 +611,7 @@ export default function MainApp() {
       appendMessage({
         id: nowId("system"),
         role: "system",
-        content: "Запускаю выполнение…",
+        content: withName(PHRASES.actStart, userName),
         tone: "info"
       });
       void openEventStream(response.run.id);

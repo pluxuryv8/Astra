@@ -1,5 +1,6 @@
 import type { EventItem, RunIntentResponse, Snapshot } from "../types/api";
-import { apiBase, createRun, getSnapshot, startRun } from "./client";
+import { createRun, getSnapshot, startRun } from "./client";
+import { getApiBaseUrl } from "./config";
 import { createEventStreamManager, type StreamCallbacks, type StreamState } from "./eventStream";
 
 export type RunService = {
@@ -29,7 +30,7 @@ export function createRunService(callbacks?: Partial<StreamCallbacks>): RunServi
     },
     fetchSnapshot: (runId) => getSnapshot(runId),
     openEventStream: (runId, options) => {
-      const manager = createEventStreamManager(apiBase(), options.eventTypes, {
+      const manager = createEventStreamManager(getApiBaseUrl(), options.eventTypes, {
         onEvent: options.onEvent,
         onStateChange: options.onStateChange,
         onError: options.onError ?? callbacks?.onError,

@@ -10,7 +10,7 @@
     "tauri": "tauri",
     "lint": "eslint \"src/**/*.{ts,tsx}\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
-    "test": "tsx --test src/__tests__/**/*.test.ts"
+    "test": "VITE_ASTRA_API_BASE_URL=http://127.0.0.1:8055/api/v1 VITE_ASTRA_BRIDGE_BASE_URL=http://127.0.0.1:43124 tsx --test src/__tests__/**/*.test.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.0",

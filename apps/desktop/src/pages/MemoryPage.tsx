@@ -8,6 +8,46 @@ import Button from "../shared/ui/Button";
 import Modal from "../shared/ui/Modal";
 import { formatTime } from "../shared/utils/formatTime";
 
+type MemoryKV = {
+  key: string;
+  value: string;
+  confidence?: number;
+};
+
+type ParsedMemoryMeta = {
+  summary: string | null;
+  facts: MemoryKV[];
+  preferences: MemoryKV[];
+};
+
+function parseMemoryMeta(value: unknown): ParsedMemoryMeta | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  const parseList = (input: unknown): MemoryKV[] => {
+    if (!Array.isArray(input)) return [];
+    return input
+      .map((item) => {
+        if (!item || typeof item !== "object") return null;
+        const row = item as Record<string, unknown>;
+        const key = typeof row.key === "string" ? row.key.trim() : "";
+        const val = typeof row.value === "string" ? row.value.trim() : "";
+        if (!key || !val) return null;
+        const next: MemoryKV = { key, value: val };
+        if (typeof row.confidence === "number") {
+          next.confidence = row.confidence;
+        }
+        return next;
+      })
+      .filter((item): item is MemoryKV => Boolean(item));
+  };
+  const summary = typeof raw.summary === "string" && raw.summary.trim() ? raw.summary.trim() : null;
+  return {
+    summary,
+    facts: parseList(raw.facts),
+    preferences: parseList(raw.preferences)
+  };
+}
+
 export default function MemoryPage() {
   const memoryItems = useAppStore((state) => state.memoryItems);
   const memoryLoading = useAppStore((state) => state.memoryLoading);
@@ -87,36 +127,70 @@ export default function MemoryPage() {
         {memoryLoading ? <div className="inline-loading">Загрузка памяти…</div> : null}
         {filtered.map((item) => (
           <div key={item.id} className="memory-card">
-            <div className="memory-card-header">
-              <div>
-                <div className="memory-title">{item.title}</div>
-                <div className="memory-meta">
-                  Обновлено · {formatTime(item.updated_at || item.created_at || "")}
-                </div>
-              </div>
-              <IconButton
-                type="button"
-                size="sm"
-                aria-label="Удалить"
-                onClick={() => setPendingDelete({ id: item.id, title: item.title })}
-              >
-                <Trash2 size={16} />
-              </IconButton>
-            </div>
-            <div className="memory-detail">{item.content}</div>
-            {(item.tags || []).length ? (
-              <div className="memory-tags">
-                {(item.tags || []).map((tag) => (
-                  <Badge key={tag} tone="muted" size="sm">
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            ) : null}
+            {(() => {
+              const meta = parseMemoryMeta(item.meta);
+              const summary = meta?.summary || item.content;
+              return (
+                <>
+                  <div className="memory-card-header">
+                    <div>
+                      <div className="memory-title">{item.title}</div>
+                      <div className="memory-meta">
+                        Обновлено · {formatTime(item.updated_at || item.created_at || "")}
+                      </div>
+                    </div>
+                    <IconButton
+                      type="button"
+                      size="sm"
+                      aria-label="Удалить"
+                      onClick={() => setPendingDelete({ id: item.id, title: item.title })}
+                    >
+                      <Trash2 size={16} />
+                    </IconButton>
+                  </div>
+                  <div className="memory-detail">{summary}</div>
+                  {meta?.facts.length ? (
+                    <div className="memory-section">
+                      <div className="memory-section-title">Факты</div>
+                      <div className="memory-kv-list">
+                        {meta.facts.map((fact, index) => (
+                          <div key={`${item.id}-fact-${index}`} className="memory-kv-row">
+                            <span className="memory-kv-key">{fact.key}</span>
+                            <span className="memory-kv-value">{fact.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {meta?.preferences.length ? (
+                    <div className="memory-section">
+                      <div className="memory-section-title">Предпочтения</div>
+                      <div className="memory-kv-list">
+                        {meta.preferences.map((pref, index) => (
+                          <div key={`${item.id}-pref-${index}`} className="memory-kv-row">
+                            <span className="memory-kv-key">{pref.key}</span>
+                            <span className="memory-kv-value">{pref.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                  {(item.tags || []).length ? (
+                    <div className="memory-tags">
+                      {(item.tags || []).map((tag) => (
+                        <Badge key={tag} tone="muted" size="sm">
+                          {tag}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : null}
+                </>
+              );
+            })()}
           </div>
         ))}
         {!filtered.length && !memoryLoading ? (
-          <div className="empty-state">Память пуста. Скажи в чате: «запомни …»</div>
+          <div className="empty-state">Память пока пуста. Расскажи, что важно учитывать в ответах.</div>
         ) : null}
       </div>
 

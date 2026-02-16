@@ -1,5 +1,6 @@
 // EN kept: публичные пути API и заголовки HTTP — контракт интеграции
 import { invoke } from "@tauri-apps/api/tauri";
+import { getApiBaseUrl } from "../shared/api/config";
 import type {
   Approval,
   MemorySearchResult,
@@ -14,8 +15,7 @@ import type {
   StatusResponse
 } from "./types";
 
-const DEFAULT_PORT = import.meta.env.VITE_API_PORT || "8055";
-const API_BASE = import.meta.env.VITE_API_BASE || `http://127.0.0.1:${DEFAULT_PORT}/api/v1`;
+const API_BASE = getApiBaseUrl();
 const SESSION_KEY = "astra_session_token";
 let sessionToken: string | null = null;
 

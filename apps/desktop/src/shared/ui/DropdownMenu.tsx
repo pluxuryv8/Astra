@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "../utils/cn";
 
 export type DropdownItem = {
@@ -13,6 +13,7 @@ export type DropdownItem = {
 export type DropdownMenuProps = {
   items: DropdownItem[];
   align?: "left" | "right";
+  side?: "top" | "bottom";
   width?: number;
   trigger: (props: { open: boolean; toggle: () => void }) => ReactNode;
   className?: string;
@@ -21,12 +22,16 @@ export type DropdownMenuProps = {
 export default function DropdownMenu({
   items,
   align = "right",
+  side = "bottom",
   width = 200,
   trigger,
   className
 }: DropdownMenuProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const [resolvedAlign, setResolvedAlign] = useState<"left" | "right">(align);
+  const [resolvedSide, setResolvedSide] = useState<"top" | "bottom">(side);
 
   useEffect(() => {
     if (!open) return;
@@ -38,13 +43,40 @@ export default function DropdownMenu({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    setResolvedAlign(align);
+    setResolvedSide(side);
+  }, [open, align, side]);
+
+  useLayoutEffect(() => {
+    if (!open || !panelRef.current) return;
+    const rect = panelRef.current.getBoundingClientRect();
+    let nextAlign = align;
+    let nextSide = side;
+
+    if (rect.left < 8) nextAlign = "left";
+    if (rect.right > window.innerWidth - 8) nextAlign = "right";
+    if (rect.top < 8) nextSide = "bottom";
+    if (rect.bottom > window.innerHeight - 8) nextSide = "top";
+
+    if (nextAlign !== resolvedAlign) setResolvedAlign(nextAlign);
+    if (nextSide !== resolvedSide) setResolvedSide(nextSide);
+  }, [open, align, side, resolvedAlign, resolvedSide]);
+
   const toggle = () => setOpen((prev) => !prev);
 
   return (
     <div className={cn("ui-dropdown", className)} ref={ref}>
       {trigger({ open, toggle })}
       {open ? (
-        <div className="ui-dropdown-panel" data-align={align} style={{ minWidth: width }}>
+        <div
+          ref={panelRef}
+          className="ui-dropdown-panel"
+          data-align={resolvedAlign}
+          data-side={resolvedSide}
+          style={{ minWidth: width }}
+        >
           {items.map((item) => (
             <button
               key={item.id}

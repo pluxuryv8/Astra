@@ -1,4 +1,4 @@
-import { API_BASE, ASTRA_BASE_DIR, ASTRA_DATA_DIR } from "./config";
+import { ASTRA_BASE_DIR, ASTRA_DATA_DIR, getApiBaseUrl } from "./config";
 import { ApiError, readErrorDetail } from "./errors";
 
 const TOKEN_KEY = "astra.auth.token";
@@ -25,6 +25,7 @@ let lastOkAt: string | null = null;
 let lastRequest: string | null = null;
 let lastAuthMode: "local" | "strict" | null = null;
 let lastTokenRequired: boolean | null = null;
+const API_BASE = getApiBaseUrl();
 
 function isTauriEnv() {
   return typeof window !== "undefined" && "__TAURI__" in window;

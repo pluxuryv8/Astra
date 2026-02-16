@@ -10,13 +10,14 @@ import type {
   StatusResponse,
   UserMemory
 } from "../types/api";
-import { API_BASE } from "./config";
+import { getApiBaseUrl } from "./config";
 import { ApiError, readErrorDetail } from "./errors";
 import { getToken, setLastRequest, setLastResponse } from "./authController";
 
 type ApiOptions = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
 
 type OpenAIStoreResponse = StatusResponse & { stored?: boolean };
+const API_BASE = getApiBaseUrl();
 
 function authHeaders() {
   const token = getToken();
@@ -37,8 +38,9 @@ async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
       ...options
     });
   } catch {
-    setLastResponse(null, "Сервер недоступен");
-    throw new ApiError("network", "Сервер недоступен");
+    const origin = new URL(API_BASE).origin;
+    setLastResponse(null, `Сервер недоступен (${origin})`);
+    throw new ApiError("network", `Сервер недоступен (${origin})`);
   }
 
   if (res.ok) {
@@ -67,7 +69,7 @@ export async function checkApiStatus(): Promise<boolean> {
 }
 
 export function apiBase() {
-  return API_BASE;
+  return getApiBaseUrl();
 }
 
 export function listProjects(): Promise<Project[]> {

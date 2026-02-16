@@ -18,6 +18,7 @@ export type StreamOptions = {
 
 const HEARTBEAT_TIMEOUT = 25000;
 const HEARTBEAT_CHECK = 4000;
+const PREFLIGHT_TIMEOUT = 4000;
 const RECONNECT_BASE = 800;
 const RECONNECT_CAP = 20000;
 const MAX_RECONNECT_ATTEMPTS = 6;
@@ -43,6 +44,7 @@ export function createEventStreamManager(baseUrl: string, eventTypes: string[], 
   let lastEventAt = 0;
   let current: StreamOptions | null = null;
   let wasReconnecting = false;
+  let connectNonce = 0;
 
   const seenSeq = new Set<number>();
   const seenHashes = new Set<string>();
@@ -139,11 +141,7 @@ export function createEventStreamManager(baseUrl: string, eventTypes: string[], 
     }, HEARTBEAT_CHECK);
   };
 
-  const connect = (options: StreamOptions) => {
-    current = options;
-    closeSource();
-    clearTimers();
-    setState(reconnectAttempt > 0 ? "reconnecting" : "connecting");
+  const buildStreamUrl = (options: StreamOptions): URL => {
     const url = new URL(`${baseUrl}/runs/${options.runId}/events`);
     if (options.token) {
       url.searchParams.set("token", options.token);
@@ -152,7 +150,26 @@ export function createEventStreamManager(baseUrl: string, eventTypes: string[], 
     if (lastEventId) {
       url.searchParams.set("last_event_id", String(lastEventId));
     }
+    return url;
+  };
 
+  const preflightUrl = (url: URL): URL => {
+    const probe = new URL(url.toString());
+    probe.searchParams.set("once", "1");
+    return probe;
+  };
+
+  const preflightErrorMessage = (status: number, url: URL): string => {
+    if (status === 401) {
+      return `SSE недоступен: 401 (token required/invalid). URL: ${url.origin}`;
+    }
+    if (status === 404) {
+      return `SSE недоступен: run не найден (404). URL: ${url.origin}`;
+    }
+    return `SSE недоступен: HTTP ${status}. URL: ${url.origin}`;
+  };
+
+  const openEventSource = (url: URL) => {
     eventSource = new EventSource(url.toString());
     eventSource.onopen = () => {
       lastEventAt = Date.now();
@@ -165,7 +182,7 @@ export function createEventStreamManager(baseUrl: string, eventTypes: string[], 
       reconnectAttempt = 0;
     };
     eventSource.onerror = () => {
-      callbacks.onError?.("Ошибка соединения SSE");
+      callbacks.onError?.(`SSE соединение потеряно. Проверь API (${url.origin}) и токен.`);
       closeSource();
       setState("reconnecting");
       scheduleReconnect();
@@ -183,7 +200,41 @@ export function createEventStreamManager(baseUrl: string, eventTypes: string[], 
     });
   };
 
+  const connect = (options: StreamOptions) => {
+    const nonce = ++connectNonce;
+    current = options;
+    closeSource();
+    clearTimers();
+    setState(reconnectAttempt > 0 ? "reconnecting" : "connecting");
+    const url = buildStreamUrl(options);
+    const probeUrl = preflightUrl(url);
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), PREFLIGHT_TIMEOUT);
+    fetch(probeUrl.toString(), { method: "GET", cache: "no-store", signal: controller.signal })
+      .then((response) => {
+        window.clearTimeout(timer);
+        if (nonce !== connectNonce) return;
+        if (!response.ok) {
+          callbacks.onError?.(preflightErrorMessage(response.status, url));
+          closeSource();
+          setState("offline");
+          scheduleReconnect();
+          return;
+        }
+        openEventSource(url);
+      })
+      .catch(() => {
+        window.clearTimeout(timer);
+        if (nonce !== connectNonce) return;
+        callbacks.onError?.(`SSE недоступен: API unreachable (${url.origin}). Проверь URL/порт.`);
+        closeSource();
+        setState("offline");
+        scheduleReconnect();
+      });
+  };
+
   const disconnect = () => {
+    connectNonce += 1;
     clearTimers();
     closeSource();
     current = null;

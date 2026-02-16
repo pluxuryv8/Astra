@@ -10,6 +10,7 @@ export default function ProfileMenu({ onNavigate }: ProfileMenuProps) {
   return (
     <DropdownMenu
       align="left"
+      side="top"
       width={220}
       items={[
         {

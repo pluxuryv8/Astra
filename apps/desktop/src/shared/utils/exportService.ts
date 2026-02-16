@@ -1,4 +1,4 @@
-import { API_BASE, ASTRA_BASE_DIR } from "../api/config";
+import { ASTRA_BASE_DIR, getApiBaseUrl } from "../api/config";
 import { getDiagnostics, checkStatus } from "../api/authController";
 import { listProjects, getSnapshot } from "../api/client";
 import { useAppStore } from "../store/appStore";
@@ -56,6 +56,8 @@ type ExportData = {
   snapshots: Array<{ run_id: string; snapshot?: Snapshot; error?: string }>;
   projects?: Array<{ id: string; name: string; tags: string[] }>;
 };
+
+const API_BASE = getApiBaseUrl();
 
 const UI_PREF_KEYS = [
   "astra.ui.sidebarWidth",

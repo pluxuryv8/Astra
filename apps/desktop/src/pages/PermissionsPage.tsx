@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ExternalLink, RefreshCw } from "lucide-react";
+import { getBridgeBaseUrl } from "../shared/api/config";
 import Button from "../shared/ui/Button";
 
 type PermissionStatus = "granted" | "denied" | "unknown";
@@ -17,12 +18,12 @@ type CaptureState = {
   message?: string;
 };
 
-const BRIDGE_PORT =
-  (import.meta.env as Record<string, string | undefined>).VITE_ASTRA_DESKTOP_BRIDGE_PORT ||
-  (import.meta.env as Record<string, string | undefined>).VITE_DESKTOP_BRIDGE_PORT ||
-  "43124";
-
-const BRIDGE_BASE = `http://127.0.0.1:${BRIDGE_PORT}`;
+const BRIDGE_BASE = getBridgeBaseUrl();
+const BRIDGE_PORT = (() => {
+  const parsed = new URL(BRIDGE_BASE);
+  if (parsed.port) return parsed.port;
+  return parsed.protocol === "https:" ? "443" : "80";
+})();
 
 const STATUS_LABELS: Record<PermissionStatus | InputStatus, string> = {
   granted: "Включено",

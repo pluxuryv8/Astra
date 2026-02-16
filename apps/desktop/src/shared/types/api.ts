@@ -160,6 +160,7 @@ export type UserMemory = {
   is_deleted?: boolean;
   pinned?: boolean;
   last_used_at?: string | null;
+  meta?: Record<string, unknown>;
 };
 
 export type Reminder = {
