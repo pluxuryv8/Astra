@@ -1,7 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-API_PORT="${ASTRA_API_PORT:-8055}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/address_config.sh"
+
+if ! apply_resolved_address_env; then
+  echo "Некорректная адресная конфигурация (API/Bridge)." >&2
+  exit 1
+fi
+
+API_PORT="$ASTRA_API_PORT"
 
 if [ -f .astra/api.pid ]; then
   kill "$(cat .astra/api.pid)" >/dev/null 2>&1 || true

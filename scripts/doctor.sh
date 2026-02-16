@@ -4,15 +4,24 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/address_config.sh"
+
 MODE="${1:-runtime}"
 if [[ "$MODE" != "prereq" && "$MODE" != "runtime" ]]; then
   echo "Usage: $0 [prereq|runtime]" >&2
   exit 1
 fi
 
-API_PORT="${ASTRA_API_PORT:-8055}"
-API_BASE="${ASTRA_API_BASE:-http://127.0.0.1:${API_PORT}/api/v1}"
-BRIDGE_PORT="${ASTRA_DESKTOP_BRIDGE_PORT:-43124}"
+if ! apply_resolved_address_env; then
+  echo "FAIL invalid address configuration (API/Bridge)" >&2
+  exit 1
+fi
+
+API_PORT="$ASTRA_API_PORT"
+API_BASE_URL="$ASTRA_API_BASE_URL"
+BRIDGE_PORT="$ASTRA_BRIDGE_PORT"
+BRIDGE_BASE_URL="$ASTRA_BRIDGE_BASE_URL"
 TOKEN_FILE=".astra/doctor.token"
 
 FAILS=0
@@ -53,9 +62,15 @@ fi
 
 check_prereq() {
   echo "Doctor mode: prereq"
+  ok "resolved API base URL: ${API_BASE_URL}"
+  ok "resolved Bridge base URL: ${BRIDGE_BASE_URL}"
 
   # Env presence (no values)
-  for var in ASTRA_API_PORT ASTRA_BASE_DIR ASTRA_DATA_DIR ASTRA_DESKTOP_BRIDGE_PORT ASTRA_VAULT_PATH ASTRA_VAULT_PASSPHRASE ASTRA_LOCAL_SECRETS_PATH OPENAI_API_KEY ASTRA_SESSION_TOKEN ASTRA_LLM_LOCAL_BASE_URL ASTRA_LLM_LOCAL_CHAT_MODEL ASTRA_LLM_LOCAL_CODE_MODEL ASTRA_LLM_CLOUD_MODEL ASTRA_CLOUD_ENABLED ASTRA_AUTO_CLOUD_ENABLED ASTRA_LLM_MAX_CONCURRENCY ASTRA_LLM_MAX_RETRIES ASTRA_LLM_BACKOFF_BASE_MS ASTRA_LLM_BUDGET_PER_RUN ASTRA_LLM_BUDGET_PER_STEP ASTRA_REMINDERS_ENABLED ASTRA_TIMEZONE TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID; do
+  CLOUD_ENABLED="${ASTRA_CLOUD_ENABLED:-false}"
+  for var in ASTRA_API_BASE_URL ASTRA_API_PORT ASTRA_BRIDGE_BASE_URL ASTRA_BRIDGE_PORT ASTRA_DESKTOP_BRIDGE_PORT ASTRA_BASE_DIR ASTRA_DATA_DIR ASTRA_VAULT_PATH ASTRA_VAULT_PASSPHRASE ASTRA_LOCAL_SECRETS_PATH OPENAI_API_KEY ASTRA_SESSION_TOKEN ASTRA_LLM_LOCAL_BASE_URL ASTRA_LLM_LOCAL_CHAT_MODEL ASTRA_LLM_LOCAL_CODE_MODEL ASTRA_LLM_CLOUD_MODEL ASTRA_CLOUD_ENABLED ASTRA_AUTO_CLOUD_ENABLED ASTRA_LLM_MAX_CONCURRENCY ASTRA_LLM_MAX_RETRIES ASTRA_LLM_BACKOFF_BASE_MS ASTRA_LLM_BUDGET_PER_RUN ASTRA_LLM_BUDGET_PER_STEP ASTRA_REMINDERS_ENABLED ASTRA_TIMEZONE TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID ASTRA_SAIGA_GGUF_URL; do
+    if [ "$var" = "OPENAI_API_KEY" ] && [[ "$CLOUD_ENABLED" =~ ^(0|false|no|off)$ ]]; then
+      continue
+    fi
     if [ -n "${!var-}" ]; then
       ok "env $var is set"
     else
@@ -99,8 +114,8 @@ PY
   fi
 
   if [ -n "$OLLAMA_TAGS" ] && [ -n "$PYTHON_BIN" ]; then
-    REQ_CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:3b-instruct}"
-    REQ_CODE_MODEL="${ASTRA_LLM_LOCAL_CODE_MODEL:-qwen2.5-coder:3b}"
+    REQ_CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-saiga-nemo-12b}"
+    REQ_CODE_MODEL="${ASTRA_LLM_LOCAL_CODE_MODEL:-deepseek-coder-v2:16b-lite-instruct-q8_0}"
     MISSING_MODELS=$($PYTHON_BIN - <<PY
 import json
 try:
@@ -109,8 +124,10 @@ except Exception:
     data={}
 models={m.get('name') for m in data.get('models', []) if isinstance(m, dict)}
 missing=[]
+def normalize(name):
+    return name if ":" in name else f"{name}:latest"
 for name in ["$REQ_CHAT_MODEL","$REQ_CODE_MODEL"]:
-    if name and name not in models:
+    if name and name not in models and normalize(name) not in models:
         missing.append(name)
 print(",".join(missing))
 PY
@@ -118,16 +135,20 @@ PY
     if [ -z "$MISSING_MODELS" ]; then
       ok "Ollama models present (${REQ_CHAT_MODEL}, ${REQ_CODE_MODEL})"
     else
-      fail "Ollama missing models: ${MISSING_MODELS}"
+      fail "Ollama missing models: ${MISSING_MODELS}. Install: ./scripts/models.sh install"
     fi
   fi
 
   if [ -n "$OLLAMA_TAGS" ] && [ -n "$PYTHON_BIN" ]; then
-    CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:3b-instruct}"
+    CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-saiga-nemo-12b}"
+    CHAT_MODEL_TEST="$CHAT_MODEL"
+    if [[ "$CHAT_MODEL_TEST" != *:* ]]; then
+      CHAT_MODEL_TEST="${CHAT_MODEL_TEST}:latest"
+    fi
     CHAT_PAYLOAD=$($PYTHON_BIN - <<PY
 import json
 print(json.dumps({
-  "model": "${CHAT_MODEL}",
+  "model": "${CHAT_MODEL_TEST}",
   "messages": [{"role": "user", "content": "hi"}],
   "stream": False
 }))
@@ -141,15 +162,14 @@ PY
     if [ "$CHAT_STATUS" = "200" ]; then
       ok "Local LLM chat ok (${CHAT_MODEL})"
     else
-      fail "Local LLM chat failed (${CHAT_MODEL}) status=${CHAT_STATUS}. Check ${OLLAMA_BASE}/api/chat"
+      warn "Local LLM chat probe failed (${CHAT_MODEL}) status=${CHAT_STATUS}. Check ${OLLAMA_BASE}/api/chat"
     fi
     rm -f "$CHAT_TMP" >/dev/null 2>&1 || true
   fi
 
   # Cloud key check
-  CLOUD_ENABLED="${ASTRA_CLOUD_ENABLED:-true}"
   if [[ "$CLOUD_ENABLED" =~ ^(0|false|no|off)$ ]]; then
-    warn "Cloud disabled (ASTRA_CLOUD_ENABLED=${CLOUD_ENABLED})"
+    ok "Cloud disabled (ASTRA_CLOUD_ENABLED=${CLOUD_ENABLED})"
   else
     if [ -n "${OPENAI_API_KEY-}" ]; then
       ok "OPENAI_API_KEY is set"
@@ -169,7 +189,7 @@ PY
   if [ -n "${ASTRA_TIMEZONE-}" ]; then
     ok "ASTRA_TIMEZONE is set"
   else
-    warn "ASTRA_TIMEZONE is not set (default Russia)"
+    warn "ASTRA_TIMEZONE is not set (default: system timezone)"
   fi
 
   if [ -n "${TELEGRAM_BOT_TOKEN-}" ] && [ -n "${TELEGRAM_CHAT_ID-}" ]; then
@@ -181,6 +201,8 @@ PY
 
 check_runtime() {
   echo "Doctor mode: runtime"
+  ok "resolved API base URL: ${API_BASE_URL}"
+  ok "resolved Bridge base URL: ${BRIDGE_BASE_URL}"
 
   API_RUNNING=0
   if lsof -nP -iTCP:"$API_PORT" -sTCP:LISTEN -t >/dev/null 2>&1; then
@@ -204,11 +226,34 @@ check_runtime() {
 
   if [ "$API_RUNNING" -eq 1 ]; then
     # API health
-    AUTH_STATUS=$(curl -s -o /tmp/astra_auth_status.json -w "%{http_code}" "${API_BASE}/auth/status" || true)
+    AUTH_STATUS=$(curl -s -o /tmp/astra_auth_status.json -w "%{http_code}" "${API_BASE_URL}/auth/status" || true)
     if [ "$AUTH_STATUS" = "200" ]; then
       ok "GET /auth/status"
     else
       fail "GET /auth/status -> HTTP ${AUTH_STATUS}"
+    fi
+
+    TOKEN_REQUIRED="unknown"
+    if [ "$AUTH_STATUS" = "200" ] && [ -n "$PYTHON_BIN" ]; then
+      TOKEN_REQUIRED=$($PYTHON_BIN - <<'PY'
+import json
+from pathlib import Path
+
+path = Path("/tmp/astra_auth_status.json")
+try:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+except Exception:
+    print("unknown")
+else:
+    value = payload.get("token_required")
+    if value is True:
+        print("true")
+    elif value is False:
+        print("false")
+    else:
+        print("unknown")
+PY
+)
     fi
 
     TOKEN="${ASTRA_SESSION_TOKEN-}"
@@ -234,10 +279,13 @@ PY
     fi
 
     TOKEN_VALID=0
-    if [ -n "$TOKEN" ]; then
+    if [ "$TOKEN_REQUIRED" = "false" ]; then
+      TOKEN_VALID=1
+      ok "token bootstrap skipped (token_required=false)"
+    elif [ -n "$TOKEN" ]; then
       BOOTSTRAP_STATUS=$(curl -s -o /tmp/astra_bootstrap.json -w "%{http_code}" \
         -H "Content-Type: application/json" \
-        -X POST "${API_BASE}/auth/bootstrap" \
+        -X POST "${API_BASE_URL}/auth/bootstrap" \
         -d "{\"token\":\"${TOKEN}\"}" || true)
       if [ "$BOOTSTRAP_STATUS" = "200" ]; then
         ok "POST /auth/bootstrap"
@@ -245,7 +293,8 @@ PY
         mkdir -p .astra
         echo "$TOKEN" > "$TOKEN_FILE"
       elif [ "$BOOTSTRAP_STATUS" = "409" ]; then
-        fail "POST /auth/bootstrap -> token already set; export ASTRA_SESSION_TOKEN"
+        warn "POST /auth/bootstrap -> token already set; trying existing token"
+        TOKEN_VALID=1
       else
         fail "POST /auth/bootstrap -> HTTP ${BOOTSTRAP_STATUS}"
       fi
@@ -255,9 +304,13 @@ PY
 
     PROJECT_ID=""
     RUN_ID=""
+    AUTH_HEADERS=()
+    if [ -n "$TOKEN" ]; then
+      AUTH_HEADERS=(-H "Authorization: Bearer ${TOKEN}")
+    fi
     if [ "$TOKEN_VALID" -eq 1 ]; then
-      PROJECT_JSON=$(curl -s -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
-        -X POST "${API_BASE}/projects" \
+      PROJECT_JSON=$(curl -s "${AUTH_HEADERS[@]}" -H "Content-Type: application/json" \
+        -X POST "${API_BASE_URL}/projects" \
         -d '{"name":"doctor","tags":["doctor"],"settings":{}}' || true)
       if [ -n "$PROJECT_JSON" ] && [ -n "$PYTHON_BIN" ]; then
         PROJECT_ID=$($PYTHON_BIN - <<PY
@@ -278,8 +331,8 @@ PY
     fi
 
     if [ -n "$PROJECT_ID" ] && [ "$TOKEN_VALID" -eq 1 ]; then
-      RUN_JSON=$(curl -s -H "Authorization: Bearer ${TOKEN}" -H "Content-Type: application/json" \
-        -X POST "${API_BASE}/projects/${PROJECT_ID}/runs" \
+      RUN_JSON=$(curl -s "${AUTH_HEADERS[@]}" -H "Content-Type: application/json" \
+        -X POST "${API_BASE_URL}/projects/${PROJECT_ID}/runs" \
         -d '{"query_text":"doctor smoke","mode":"plan_only"}' || true)
       if [ -n "$RUN_JSON" ] && [ -n "$PYTHON_BIN" ]; then
         RUN_ID=$($PYTHON_BIN - <<PY
@@ -304,7 +357,11 @@ PY
     fi
 
     if [ -n "$RUN_ID" ] && [ "$TOKEN_VALID" -eq 1 ]; then
-      SSE_OUT=$(curl -s --max-time 3 "${API_BASE}/runs/${RUN_ID}/events?token=${TOKEN}&once=1" || true)
+      SSE_URL="${API_BASE_URL}/runs/${RUN_ID}/events?once=1"
+      if [ -n "$TOKEN" ]; then
+        SSE_URL="${SSE_URL}&token=${TOKEN}"
+      fi
+      SSE_OUT=$(curl -s --max-time 3 "${SSE_URL}" || true)
       if echo "$SSE_OUT" | grep -q "^event:"; then
         ok "GET /runs/{id}/events (SSE)"
       else

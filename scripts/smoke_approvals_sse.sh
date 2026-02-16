@@ -4,8 +4,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-API_PORT="${ASTRA_API_PORT:-8055}"
-API_BASE="${ASTRA_API_BASE:-http://127.0.0.1:${API_PORT}/api/v1}"
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/address_config.sh"
+
+if ! apply_resolved_address_env; then
+  echo "FAIL invalid address configuration (API/Bridge)" >&2
+  exit 1
+fi
+
+API_BASE_URL="$ASTRA_API_BASE_URL"
 TOKEN_FILE=".astra/doctor.token"
 
 ok() { echo "OK  $*"; }
@@ -23,7 +30,7 @@ if [ -z "$TOKEN" ] && [ -f "$TOKEN_FILE" ]; then
   TOKEN_SOURCE="file"
 fi
 
-HTTP_STATUS=$(curl -s -o /tmp/astra_smoke_auth.json -w "%{http_code}" "${API_BASE}/auth/status" || true)
+HTTP_STATUS=$(curl -s -o /tmp/astra_smoke_auth.json -w "%{http_code}" "${API_BASE_URL}/auth/status" || true)
 if [ "$HTTP_STATUS" != "200" ]; then
   fail "API auth status failed (HTTP ${HTTP_STATUS})"
 fi
@@ -44,7 +51,7 @@ PY
 
   BOOTSTRAP_STATUS=$(curl -s -o /tmp/astra_smoke_bootstrap.json -w "%{http_code}" \
     -H "Content-Type: application/json" \
-    -X POST "${API_BASE}/auth/bootstrap" \
+    -X POST "${API_BASE_URL}/auth/bootstrap" \
     -d "{\"token\":\"${TOKEN}\"}" || true)
   if [ "$BOOTSTRAP_STATUS" != "200" ]; then
     fail "POST /auth/bootstrap -> HTTP ${BOOTSTRAP_STATUS} (set ASTRA_SESSION_TOKEN if already set)"
@@ -55,7 +62,7 @@ else
   PROJECT_PROBE=$(curl -s -o /tmp/astra_smoke_probe.json -w "%{http_code}" \
     -H "Authorization: Bearer ${TOKEN}" \
     -H "Content-Type: application/json" \
-    -X POST "${API_BASE}/projects" \
+    -X POST "${API_BASE_URL}/projects" \
     -d '{"name":"smoke-probe","tags":["smoke"],"settings":{}}' || true)
   if [ "$PROJECT_PROBE" = "401" ]; then
     fail "Token rejected (401). Set ASTRA_SESSION_TOKEN to the active token or re-bootstrap."
@@ -65,7 +72,7 @@ fi
 PROJECT_JSON=$(curl -s \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -X POST "${API_BASE}/projects" \
+  -X POST "${API_BASE_URL}/projects" \
   -d '{"name":"smoke-approvals","tags":["smoke"],"settings":{}}' || true)
 
 PROJECT_ID=$(python3 - <<PY
@@ -83,7 +90,7 @@ ok "POST /projects"
 RUN_JSON=$(curl -s \
   -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
-  -X POST "${API_BASE}/projects/${PROJECT_ID}/runs" \
+  -X POST "${API_BASE_URL}/projects/${PROJECT_ID}/runs" \
   -d '{"query_text":"Открой браузер и отправь тестовое сообщение (smoke)","mode":"execute_confirm"}' || true)
 
 RUN_ID=$(python3 - <<PY
@@ -101,7 +108,7 @@ ok "POST /projects/{id}/runs"
 
 START_STATUS=$(curl -s -o /tmp/astra_smoke_start.json -w "%{http_code}" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -X POST "${API_BASE}/runs/${RUN_ID}/start" || true)
+  -X POST "${API_BASE_URL}/runs/${RUN_ID}/start" || true)
 if [ "$START_STATUS" != "200" ]; then
   fail "POST /runs/{id}/start -> HTTP ${START_STATUS}"
 fi
@@ -109,7 +116,7 @@ ok "POST /runs/{id}/start"
 
 APPROVAL_ID=""
 for _ in {1..20}; do
-  APPROVALS_JSON=$(curl -s -H "Authorization: Bearer ${TOKEN}" "${API_BASE}/runs/${RUN_ID}/approvals" || true)
+  APPROVALS_JSON=$(curl -s -H "Authorization: Bearer ${TOKEN}" "${API_BASE_URL}/runs/${RUN_ID}/approvals" || true)
   APPROVAL_ID=$(python3 - <<PY
 import json
 try:
@@ -128,7 +135,7 @@ PY
 [ -n "$APPROVAL_ID" ] || fail "Approval not created"
 ok "Approval created: ${APPROVAL_ID}"
 
-SSE_OUT=$(curl -sN -H "Authorization: Bearer ${TOKEN}" "${API_BASE}/runs/${RUN_ID}/events?once=1" || true)
+SSE_OUT=$(curl -sN -H "Authorization: Bearer ${TOKEN}" "${API_BASE_URL}/runs/${RUN_ID}/events?once=1" || true)
 if echo "$SSE_OUT" | grep -q "approval_requested"; then
   ok "SSE contains approval_requested"
 else
@@ -137,7 +144,7 @@ fi
 
 REJECT_STATUS=$(curl -s -o /tmp/astra_smoke_reject.json -w "%{http_code}" \
   -H "Authorization: Bearer ${TOKEN}" \
-  -X POST "${API_BASE}/approvals/${APPROVAL_ID}/reject" || true)
+  -X POST "${API_BASE_URL}/approvals/${APPROVAL_ID}/reject" || true)
 if [ "$REJECT_STATUS" != "200" ]; then
   warn "POST /approvals/{id}/reject -> HTTP ${REJECT_STATUS}"
 else

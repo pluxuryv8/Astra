@@ -13,6 +13,8 @@ from typing import Any
 
 import httpx
 
+from lib.address_resolver import resolve_api_base_url
+
 try:
     import yaml
 except Exception:  # pragma: no cover - fallback
@@ -41,12 +43,6 @@ def _load_scenarios(path: Path) -> list[dict[str, Any]]:
     if isinstance(data, list):
         return data
     raise ValueError("Invalid scenarios.yaml format")
-
-
-def _get_api_base() -> str:
-    port = os.getenv("ASTRA_API_PORT", "8055")
-    base = os.getenv("ASTRA_API_BASE", f"http://127.0.0.1:{port}/api/v1")
-    return base.rstrip("/")
 
 
 def _load_token_file(path: Path) -> str | None:
@@ -277,7 +273,7 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=90)
     args = parser.parse_args()
 
-    api_base = _get_api_base()
+    api_base = resolve_api_base_url()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     artifacts_root = ROOT / "artifacts" / "qa" / timestamp
     artifacts_root.mkdir(parents=True, exist_ok=True)

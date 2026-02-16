@@ -5,13 +5,21 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$ROOT_DIR"
 
+# shellcheck disable=SC1091
+source "$ROOT_DIR/scripts/lib/address_config.sh"
+
+if ! apply_resolved_address_env; then
+  echo "FAIL Некорректная адресная конфигурация (API/Bridge)." >&2
+  exit 1
+fi
+
 CMD="${1:-dev}"
 if [ $# -gt 0 ]; then
   shift
 fi
 
-API_PORT="${ASTRA_API_PORT:-8055}"
-BRIDGE_PORT="${ASTRA_DESKTOP_BRIDGE_PORT:-43124}"
+API_PORT="$ASTRA_API_PORT"
+BRIDGE_PORT="$ASTRA_BRIDGE_PORT"
 VITE_PORT=5173
 OLLAMA_PORT=11434
 

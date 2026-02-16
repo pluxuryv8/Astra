@@ -1,0 +1,2 @@
+# Saiga Nemo 12B GGUF (local file path is injected by scripts/models.sh)
+FROM __SAIGA_GGUF_PATH__

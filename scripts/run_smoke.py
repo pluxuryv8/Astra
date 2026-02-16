@@ -12,19 +12,9 @@ from typing import Any
 
 import requests
 
+from lib.address_resolver import resolve_api_base_url, resolve_bridge_base_url
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _get_api_base() -> str:
-    port = os.getenv("ASTRA_API_PORT", "8055")
-    base = os.getenv("ASTRA_API_BASE", f"http://127.0.0.1:{port}/api/v1")
-    return base.rstrip("/")
-
-
-def _get_bridge_base() -> str:
-    port = os.getenv("ASTRA_DESKTOP_BRIDGE_PORT", "43124")
-    return f"http://127.0.0.1:{port}"
 
 
 def _load_token_file(path: Path) -> str | None:
@@ -104,8 +94,8 @@ def main() -> int:
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args()
 
-    api_base = _get_api_base()
-    bridge_base = _get_bridge_base()
+    api_base = resolve_api_base_url()
+    bridge_base = resolve_bridge_base_url()
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     artifacts_root = ROOT / "artifacts" / "smoke" / timestamp
     artifacts_root.mkdir(parents=True, exist_ok=True)
