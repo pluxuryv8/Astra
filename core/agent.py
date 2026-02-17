@@ -6,7 +6,13 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from core import agent_reflection, agentic_improve
 from core.chat_context import build_user_profile_context
+from core.graph_workflow import graph_workflow, is_workflow_task
+from memory import letta_bridge
+from skills import metagpt_dev, phidata_tools, superagi_autonomy
+from skills.autogen_chat import autogen_chat, is_conversation_task
+from skills.crew_multi_think import crew_think, is_complex_task
 
 _PROMPTS_DIR = Path(__file__).resolve().parents[1] / "prompts"
 _PROMPT_FILES = {
@@ -122,6 +128,19 @@ _GRATITUDE_TOKENS = ("спасибо", "благодар", "круто", "кла
 _TRUST_TOKENS = ("помоги", "выручи", "рассчитываю", "я с тобой", "держи меня")
 _CRISIS_TOKENS = ("пиздец", "паника", "катастроф", "всё пропало", "аврал")
 _POSITIVE_ENERGY_TOKENS = ("погнали", "давай", "огонь", "вперёд", "разъеб")
+_WORKFLOW_TOKENS = ("workflow", "воркфло", "граф", "pipeline", "пайплайн", "оркестрац", "stateful")
+_CONVERSATION_TOKENS = ("поговор", "диалог", "обсуд", "chat", "conversation", "brainstorm")
+_AUTONOMY_TOKENS = ("autonomy", "автоном", "self-task", "scheduler", "без моего участия")
+_DEV_TASK_TOKENS = ("dev_task", "напиши модуль", "реализ", "feature", "код", "module", "тест")
+_SELF_IMPROVE_TOKENS = (
+    "self_improve",
+    "self improve",
+    "self-improve",
+    "самоулучш",
+    "feedback loop",
+    "адаптир",
+    "улучши себя",
+)
 
 _WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9_+-]+")
 
@@ -168,6 +187,11 @@ def _signal_counts(text: str) -> dict[str, int]:
     dry_task = _count_token_hits(text, _DRY_TOKENS)
     technical = _count_token_hits(text, _TECH_TOKENS)
     energetic = _count_token_hits(text, _POSITIVE_ENERGY_TOKENS)
+    workflow_cues = _count_token_hits(text, _WORKFLOW_TOKENS)
+    conversation_cues = _count_token_hits(text, _CONVERSATION_TOKENS)
+    autonomy_cues = _count_token_hits(text, _AUTONOMY_TOKENS)
+    dev_task_cues = _count_token_hits(text, _DEV_TASK_TOKENS)
+    self_improve_cues = _count_token_hits(text, _SELF_IMPROVE_TOKENS)
 
     signals = {
         "word_count": len(words),
@@ -184,6 +208,11 @@ def _signal_counts(text: str) -> dict[str, int]:
         "gratitude": _count_token_hits(text, _GRATITUDE_TOKENS),
         "trust_language": _count_token_hits(text, _TRUST_TOKENS),
         "crisis_cues": _count_token_hits(text, _CRISIS_TOKENS),
+        "workflow_cues": workflow_cues,
+        "conversation_cues": conversation_cues,
+        "autonomy_cues": autonomy_cues,
+        "dev_task_cues": dev_task_cues,
+        "self_improve_cues": self_improve_cues,
         "positive_energy": energetic,
         "energetic_markers": energetic + exclamation + uppercase,
         "brevity_request": 1 if ("кратко" in _normalized_text(text) or "коротко" in _normalized_text(text) or "без воды" in _normalized_text(text)) else 0,
@@ -444,13 +473,27 @@ def _self_reflection_text(
     recall: dict[str, Any],
     mode_plan: dict[str, Any],
     signals: dict[str, int],
+    task_complex: bool = False,
+    workflow: bool = False,
+    conversation: bool = False,
+    autonomy: bool = False,
+    dev_task: bool = False,
+    self_improve: bool = False,
 ) -> str:
     shift = "shift detected" if recall.get("detected_shift") else "tone stable"
     urgency = "urgent" if signals.get("urgency", 0) > 0 else "normal pace"
+    planning_mode = "parallel" if task_complex else "single"
+    workflow_mode = "workflow" if workflow else "no-workflow"
+    conversation_mode = "conversation" if conversation else "no-conversation"
+    autonomy_mode = "autonomy" if autonomy else "manual"
+    dev_mode = "dev" if dev_task else "general"
+    improve_mode = "enabled" if self_improve else "disabled"
     return (
         "Self-reflection: "
         f"tone={tone_type} intensity={intensity:.2f}; {shift}; pace={urgency}; "
         f"mode_mix={mode_plan.get('primary_mode')} + {mode_plan.get('supporting_mode')}; "
+        f"planning={planning_mode}; orchestration={workflow_mode}; dialog={conversation_mode}; "
+        f"autonomy={autonomy_mode}; dev_mode={dev_mode}; self_improve={improve_mode}; "
         "compose answer with full improvisation via self-reflection and no canned opener."
     )
 
@@ -458,6 +501,46 @@ def _self_reflection_text(
 def analyze_tone(user_msg: str, history: list[dict], *, memories: list[dict] | None = None) -> dict[str, Any]:
     text = (user_msg or "").strip()
     tone_type, intensity, signals = _classify_tone_type(text)
+    task_complex = is_complex_task(text, tone_analysis={"signals": signals}, history=history)
+    workflow = is_workflow_task(text, tone_analysis={"signals": signals, "task_complex": task_complex}, history=history)
+    conversation = is_conversation_task(
+        text,
+        tone_analysis={"signals": signals, "task_complex": task_complex, "workflow": workflow},
+        history=history,
+    )
+    autonomy = superagi_autonomy.is_autonomy_task(
+        text,
+        tone_analysis={
+            "signals": signals,
+            "task_complex": task_complex,
+            "workflow": workflow,
+            "conversation": conversation,
+        },
+        history=history,
+    )
+    dev_task = metagpt_dev.is_dev_task(
+        text,
+        tone_analysis={
+            "signals": signals,
+            "task_complex": task_complex,
+            "workflow": workflow,
+            "conversation": conversation,
+            "autonomy": autonomy,
+        },
+        history=history,
+    )
+    self_improve = agentic_improve.is_self_improve_task(
+        text,
+        tone_analysis={
+            "signals": signals,
+            "task_complex": task_complex,
+            "workflow": workflow,
+            "conversation": conversation,
+            "autonomy": autonomy,
+            "dev_task": dev_task,
+        },
+        history=history,
+    )
 
     history_types: list[str] = []
     history_intensities: list[float] = []
@@ -485,7 +568,31 @@ def analyze_tone(user_msg: str, history: list[dict], *, memories: list[dict] | N
         "same_type_count": same_type_count,
         "recent_avg_intensity": recent_avg_intensity,
         "trend": trend,
+        "autonomy_cues": int(signals.get("autonomy_cues", 0)),
+        "dev_task_cues": int(signals.get("dev_task_cues", 0)),
+        "self_improve_cues": int(signals.get("self_improve_cues", 0)),
     }
+    letta_recall = letta_bridge.retrieve(history, query=text)
+    recall["letta_hits"] = int(letta_recall.get("hit_count") or 0)
+    phidata_context = phidata_tools.rag(history, query=text)
+    recall["phidata_hits"] = int(phidata_context.get("hit_count") or 0)
+    praison_reflect = agent_reflection.run(
+        history,
+        user_message=text,
+        tone_analysis={
+            "type": tone_type,
+            "intensity": intensity,
+            "signals": signals,
+            "recall": recall,
+            "task_complex": task_complex,
+            "workflow": workflow,
+            "conversation": conversation,
+            "autonomy": autonomy,
+            "dev_task": dev_task,
+            "self_improve": self_improve,
+        },
+    )
+    recall["praison_confidence"] = float(praison_reflect.get("confidence") or 0.0)
 
     mode_recall = retrieve_modes(history, memories=memories)
     mode_plan = _select_modes(tone_type, signals, recall, mode_recall)
@@ -502,8 +609,29 @@ def analyze_tone(user_msg: str, history: list[dict], *, memories: list[dict] | N
         "candidate_modes": mode_plan["candidate_modes"],
         "mode_history": mode_recall.get("mode_history", []),
         "response_shape": response_shape,
+        "task_complex": task_complex,
+        "workflow": workflow,
+        "conversation": conversation,
+        "autonomy": autonomy,
+        "dev_task": dev_task,
+        "self_improve": self_improve,
+        "letta_recall": letta_recall,
+        "phidata_context": phidata_context,
+        "praison_reflect": praison_reflect,
     }
-    analysis["self_reflection"] = _self_reflection_text(tone_type, intensity, recall, mode_plan, signals)
+    analysis["self_reflection"] = _self_reflection_text(
+        tone_type,
+        intensity,
+        recall,
+        mode_plan,
+        signals,
+        task_complex=task_complex,
+        workflow=workflow,
+        conversation=conversation,
+        autonomy=autonomy,
+        dev_task=dev_task,
+        self_improve=self_improve,
+    )
     return analysis
 
 
@@ -522,6 +650,25 @@ def _tone_runtime_directives(tone_analysis: dict[str, Any]) -> list[str]:
         f"Форма ответа: {response_shape}.",
         "Применяй full improvisation via self-reflection перед отправкой.",
     ]
+    if tone_analysis.get("task_complex"):
+        directives.append("If complex_task, use CrewAI-style parallel thinking before final answer.")
+    if tone_analysis.get("workflow"):
+        directives.append("If workflow, use LangGraph-style stateful workflow before final answer.")
+    if tone_analysis.get("conversation"):
+        directives.append("If conversation, use AutoGen-style multi-agent conversation before final answer.")
+    if tone_analysis.get("autonomy"):
+        directives.append("If autonomy, use SuperAGI-style scheduler and self-task loop before final answer.")
+    if tone_analysis.get("dev_task"):
+        directives.append("If dev_task, use MetaGPT-style PRD->Code->Review->Test flow before final answer.")
+    if tone_analysis.get("self_improve"):
+        directives.append("If self_improve, run Agentic Context feedback loop before final answer.")
+    praison = tone_analysis.get("praison_reflect") if isinstance(tone_analysis.get("praison_reflect"), dict) else {}
+    if praison.get("mode_boost"):
+        directives.append(f"Praison reflection boost: {praison.get('mode_boost')}.")
+    phidata_ctx = tone_analysis.get("phidata_context") if isinstance(tone_analysis.get("phidata_context"), dict) else {}
+    recommended = phidata_ctx.get("recommended_tools") if isinstance(phidata_ctx.get("recommended_tools"), list) else []
+    if recommended:
+        directives.append(f"Phidata RAG tools hint: {', '.join(str(item) for item in recommended[:4])}.")
 
     if tone_type == "dry":
         directives.extend(
@@ -801,6 +948,31 @@ def update_profile_by_mode(
     )
 
     existing_pairs = _profile_preference_pairs(memories)
+    agentic_result = agentic_improve.run(
+        user_msg,
+        tone_analysis=tone_analysis,
+        mode_history=history_modes,
+        existing_pairs=existing_pairs,
+    )
+    agentic_preferences = agentic_result.get("preferences") if isinstance(agentic_result, dict) else []
+    if isinstance(agentic_preferences, list):
+        for pref in agentic_preferences:
+            if not isinstance(pref, dict):
+                continue
+            key = str(pref.get("key") or "").strip()
+            value = str(pref.get("value") or "").strip()
+            if not key or not value:
+                continue
+            confidence = float(pref.get("confidence") or base_confidence)
+            candidates.append(
+                {
+                    "key": key,
+                    "value": value,
+                    "confidence": max(0.62, min(0.96, confidence)),
+                    "summary": f"Self-improve feedback: {agentic_result.get('summary') or 'updated by agentic loop'}.",
+                }
+            )
+
     preferences, summaries = _prepare_preferences(user_msg, candidates, existing_pairs)
     if not preferences:
         return None
@@ -808,6 +980,9 @@ def update_profile_by_mode(
     summary = " ".join(dict.fromkeys(summaries))
     if not summary:
         summary = "Обновлена история режимов общения пользователя."
+    agentic_summary = str(agentic_result.get("summary") or "").strip() if isinstance(agentic_result, dict) else ""
+    if agentic_summary and agentic_summary not in summary:
+        summary = f"{summary} {agentic_summary}".strip()
 
     return _build_auto_memory_payload(
         user_msg,
@@ -910,6 +1085,161 @@ def merge_memory_payloads(primary: dict[str, Any] | None, secondary: dict[str, A
     return result
 
 
+def _parallel_think_prompt_block(parallel_result: dict[str, Any]) -> str:
+    if not isinstance(parallel_result, dict):
+        return "Parallel mode: off."
+    mode = str(parallel_result.get("mode") or "single")
+    if mode != "parallel":
+        return "Parallel mode: off."
+    items = parallel_result.get("items") if isinstance(parallel_result.get("items"), list) else []
+    if not items:
+        return "Parallel mode: on, but no worker output."
+    lines: list[str] = ["Parallel mode: ON (CrewAI-style)."]
+    for item in items[:6]:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("agent") or "worker")
+        output = str(item.get("output") or "").strip()
+        if not output:
+            continue
+        lines.append(f"- {role}: {output[:220]}")
+    return "\n".join(lines)
+
+
+def _workflow_prompt_block(workflow_result: dict[str, Any]) -> str:
+    if not isinstance(workflow_result, dict):
+        return "Workflow mode: off."
+    if str(workflow_result.get("mode") or "single") != "workflow":
+        return "Workflow mode: off."
+    if not workflow_result.get("executed"):
+        return "Workflow mode: requested, but graph not executed."
+    state = workflow_result.get("state") if isinstance(workflow_result.get("state"), dict) else {}
+    lines = [
+        "Workflow mode: ON (LangGraph-style).",
+        f"- decompose: {str(state.get('decompose_output') or '')[:220]}",
+        f"- implement: {str(state.get('implement_output') or '')[:220]}",
+        f"- verify: {str(state.get('verify_output') or '')[:220]}",
+    ]
+    return "\n".join(lines)
+
+
+def _autogen_prompt_block(conversation_result: dict[str, Any]) -> str:
+    if not isinstance(conversation_result, dict):
+        return "Conversation mode: off."
+    if str(conversation_result.get("mode") or "single") != "conversation":
+        return "Conversation mode: off."
+    if not conversation_result.get("executed"):
+        return "Conversation mode: requested, but dialog not executed."
+    turns = conversation_result.get("turns") if isinstance(conversation_result.get("turns"), list) else []
+    if not turns:
+        return "Conversation mode: on, no turns captured."
+    lines = ["Conversation mode: ON (AutoGen-style)."]
+    for item in turns[:6]:
+        if not isinstance(item, dict):
+            continue
+        speaker = str(item.get("speaker") or "agent")
+        message = str(item.get("message") or "").strip()
+        if not message:
+            continue
+        lines.append(f"- {speaker}: {message[:220]}")
+    return "\n".join(lines)
+
+
+def _praison_prompt_block(reflection: dict[str, Any]) -> str:
+    if not isinstance(reflection, dict):
+        return "Praison reflection: unavailable."
+    if not reflection.get("updated"):
+        return "Praison reflection: not updated."
+    lines = [
+        f"focus={reflection.get('focus') or 'answer_quality'}",
+        f"boost={reflection.get('mode_boost') or 'low'}",
+        f"confidence={reflection.get('confidence') or 0.0}",
+        str(reflection.get("summary") or "no summary"),
+    ]
+    return "\n".join(f"- {line}" for line in lines)
+
+
+def _superagi_prompt_block(autonomy_result: dict[str, Any]) -> str:
+    if not isinstance(autonomy_result, dict):
+        return "Autonomy mode: off."
+    if str(autonomy_result.get("mode") or "single") != "autonomy":
+        return "Autonomy mode: off."
+    if not autonomy_result.get("started"):
+        return "Autonomy mode: requested, but scheduler not started."
+    tasks = autonomy_result.get("tasks") if isinstance(autonomy_result.get("tasks"), list) else []
+    lines = ["Autonomy mode: ON (SuperAGI-style)."]
+    for item in tasks[:6]:
+        if not isinstance(item, dict):
+            continue
+        instruction = str(item.get("instruction") or "").strip()
+        output = str(item.get("output") or "").strip()
+        if instruction:
+            lines.append(f"- task: {instruction[:180]}")
+        if output:
+            lines.append(f"  output: {output[:180]}")
+    return "\n".join(lines)
+
+
+def _metagpt_prompt_block(dev_result: dict[str, Any]) -> str:
+    if not isinstance(dev_result, dict):
+        return "Dev mode: off."
+    if str(dev_result.get("mode") or "single") != "dev":
+        return "Dev mode: off."
+    if not dev_result.get("executed"):
+        return "Dev mode: requested, but pipeline not executed."
+    return "\n".join(
+        [
+            "Dev mode: ON (MetaGPT-style).",
+            f"- prd: {str(dev_result.get('prd') or '')[:220]}",
+            f"- review: {str(dev_result.get('review') or '')[:220]}",
+            f"- tests: {str(dev_result.get('tests') or '')[:220]}",
+        ]
+    )
+
+
+def _agentic_prompt_block(improve_result: dict[str, Any]) -> str:
+    if not isinstance(improve_result, dict):
+        return "Self-improve mode: off."
+    if not improve_result.get("self_improve"):
+        return "Self-improve mode: off."
+    if not improve_result.get("updated"):
+        return "Self-improve mode: requested, no new preferences."
+    preferences = improve_result.get("preferences") if isinstance(improve_result.get("preferences"), list) else []
+    lines = ["Self-improve mode: ON (Agentic Context Engine style)."]
+    for pref in preferences[:6]:
+        if not isinstance(pref, dict):
+            continue
+        key = str(pref.get("key") or "").strip()
+        value = str(pref.get("value") or "").strip()
+        confidence = pref.get("confidence")
+        if key and value:
+            lines.append(f"- {key}={value} (confidence={confidence})")
+    return "\n".join(lines)
+
+
+def system_health_check() -> dict[str, Any]:
+    module_status = {
+        "crewai_parallel": callable(crew_think),
+        "letta_memory": callable(letta_bridge.retrieve) and callable(letta_bridge.update),
+        "langgraph_workflow": callable(graph_workflow),
+        "phidata_tools": callable(phidata_tools.rag),
+        "autogen_conversation": callable(autogen_chat),
+        "praison_reflection": callable(agent_reflection.run),
+        "superagi_autonomy": callable(superagi_autonomy.run),
+        "metagpt_dev": callable(metagpt_dev.run),
+        "agentic_improve": callable(agentic_improve.run),
+    }
+    active = sum(1 for value in module_status.values() if value)
+    total = len(module_status)
+    return {
+        "active_count": active,
+        "total_agents": total,
+        "all_active": active == total,
+        "module_status": module_status,
+        "summary": f"Agents: {active}/{total} active",
+    }
+
+
 def build_dynamic_prompt(
     memories: list[dict],
     response_style_hint: str | None,
@@ -925,7 +1255,109 @@ def build_dynamic_prompt(
     style_hints = profile_context.get("style_hints") if isinstance(profile_context.get("style_hints"), list) else []
     user_name = profile_context.get("user_name") if isinstance(profile_context.get("user_name"), str) else None
 
-    analysis = tone_analysis if isinstance(tone_analysis, dict) else analyze_tone(user_message, history, memories=memories)
+    analysis = tone_analysis if isinstance(tone_analysis, dict) else analyze_tone(
+        user_message,
+        history,
+        memories=memories,
+    )
+    health_report = system_health_check()
+    analysis["system_health"] = health_report
+    if analysis.get("task_complex"):
+        parallel_result = crew_think(
+            user_message,
+            history,
+            tone_analysis=analysis,
+        )
+    else:
+        parallel_result = {
+            "mode": "single",
+            "task_complex": False,
+            "items": [],
+            "summary": "Parallel crew not engaged.",
+        }
+    analysis["parallel_think"] = parallel_result
+    if analysis.get("workflow"):
+        workflow_result = graph_workflow(
+            user_message,
+            history,
+            tone_analysis=analysis,
+        )
+    else:
+        workflow_result = {
+            "mode": "single",
+            "workflow": False,
+            "executed": False,
+            "summary": "Workflow graph not engaged.",
+            "state": {},
+        }
+    analysis["workflow_graph"] = workflow_result
+    if analysis.get("conversation"):
+        conversation_result = autogen_chat(
+            user_message,
+            history,
+            tone_analysis=analysis,
+        )
+    else:
+        conversation_result = {
+            "mode": "single",
+            "conversation": False,
+            "executed": False,
+            "turns": [],
+            "summary": "AutoGen chat not engaged.",
+        }
+    analysis["autogen_chat"] = conversation_result
+    if analysis.get("autonomy"):
+        autonomy_result = superagi_autonomy.run(
+            user_message,
+            history,
+            tone_analysis=analysis,
+        )
+    else:
+        autonomy_result = {
+            "mode": "single",
+            "autonomy": False,
+            "started": False,
+            "tasks": [],
+            "summary": "SuperAGI autonomy not engaged.",
+        }
+    analysis["superagi_autonomy"] = autonomy_result
+    if analysis.get("dev_task"):
+        metagpt_result = metagpt_dev.run(
+            user_message,
+            history,
+            tone_analysis=analysis,
+        )
+    else:
+        metagpt_result = {
+            "mode": "single",
+            "dev_task": False,
+            "executed": False,
+            "generated_code": "",
+            "summary": "MetaGPT dev pipeline not engaged.",
+        }
+    analysis["metagpt_dev"] = metagpt_result
+    if analysis.get("self_improve"):
+        agentic_result = agentic_improve.run(
+            user_message,
+            tone_analysis=analysis,
+            mode_history=analysis.get("mode_history") if isinstance(analysis.get("mode_history"), list) else [],
+            history=history,
+        )
+    else:
+        agentic_result = {
+            "self_improve": False,
+            "updated": False,
+            "preferences": [],
+            "summary": "Agentic context improve not engaged.",
+        }
+    analysis["agentic_improve"] = agentic_result
+    letta_update = letta_bridge.update(
+        user_message=user_message,
+        history=history,
+        tone_analysis=analysis,
+        crew_result=parallel_result,
+    )
+    analysis["letta_update"] = letta_update
     runtime_directives = _tone_runtime_directives(analysis)
     runtime_analysis_json = json.dumps(analysis, ensure_ascii=False, indent=2)
 
@@ -939,6 +1371,28 @@ def build_dynamic_prompt(
         "Режим владельца: ON." if owner_direct_mode else "Режим владельца: OFF.",
         f"Self-reflection trace: {analysis.get('self_reflection')}",
     ]
+    if isinstance(parallel_result, dict) and parallel_result.get("mode") == "parallel":
+        runtime_lines.append(f"Parallel summary: {parallel_result.get('summary') or 'generated'}")
+    if isinstance(workflow_result, dict) and workflow_result.get("executed"):
+        runtime_lines.append(f"Workflow summary: {workflow_result.get('summary') or 'generated'}")
+    if isinstance(conversation_result, dict) and conversation_result.get("executed"):
+        runtime_lines.append(f"Conversation summary: {conversation_result.get('summary') or 'generated'}")
+    if isinstance(autonomy_result, dict) and autonomy_result.get("started"):
+        runtime_lines.append(f"Autonomy summary: {autonomy_result.get('summary') or 'generated'}")
+    if isinstance(metagpt_result, dict) and metagpt_result.get("executed"):
+        runtime_lines.append(f"MetaGPT summary: {metagpt_result.get('summary') or 'generated'}")
+    if isinstance(agentic_result, dict) and agentic_result.get("self_improve"):
+        runtime_lines.append(f"Agentic improve: {agentic_result.get('summary') or 'generated'}")
+    letta_recall = analysis.get("letta_recall") if isinstance(analysis.get("letta_recall"), dict) else {}
+    if letta_recall.get("summary"):
+        runtime_lines.append(f"Episodic recall: {letta_recall.get('summary')}")
+    phidata_context = analysis.get("phidata_context") if isinstance(analysis.get("phidata_context"), dict) else {}
+    if phidata_context.get("summary"):
+        runtime_lines.append(f"Phidata context: {phidata_context.get('summary')}")
+    praison_reflect = analysis.get("praison_reflect") if isinstance(analysis.get("praison_reflect"), dict) else {}
+    if praison_reflect.get("summary"):
+        runtime_lines.append(f"Praison reflection: {praison_reflect.get('summary')}")
+    runtime_lines.append(health_report.get("summary") or "Agents: status unavailable.")
     if user_name:
         runtime_lines.append(f"Имя пользователя: {user_name}.")
     if response_style_hint:
@@ -958,7 +1412,17 @@ def build_dynamic_prompt(
             "[Variation Rules]\n" + persona["variation_rules"],
             "[Runtime Analysis]\n" + runtime_analysis_json,
             "[Runtime Directives]\n- " + "\n- ".join(runtime_directives),
+            "[Parallel Thinking]\n" + _parallel_think_prompt_block(parallel_result),
+            "[Workflow Graph]\n" + _workflow_prompt_block(workflow_result),
+            "[AutoGen Chat]\n" + _autogen_prompt_block(conversation_result),
+            "[SuperAGI Autonomy]\n" + _superagi_prompt_block(autonomy_result),
+            "[MetaGPT Dev]\n" + _metagpt_prompt_block(metagpt_result),
+            "[Agentic Improve]\n" + _agentic_prompt_block(agentic_result),
             "[Mode Recall]\n- " + "\n- ".join(mode_lines),
+            "[Letta Recall]\n" + str(letta_recall.get("summary") or "No episodic recalls."),
+            "[Phidata RAG]\n" + str(phidata_context.get("summary") or "No RAG context."),
+            "[Praison Reflection]\n" + _praison_prompt_block(praison_reflect),
+            "[System Health]\n" + str(health_report.get("summary") or "Agents: status unavailable."),
             "[Profile Recall]\n- " + "\n- ".join(runtime_lines) + "\n" + profile_lines,
         ]
     )
@@ -1013,12 +1477,41 @@ def main() -> int:
     parser.add_argument("--memories-json", default="", help="JSON array of profile memory objects")
     args = parser.parse_args()
 
+    history = _parse_history_arg(args.history_json)
+    memories = _parse_memories_arg(args.memories_json)
     analysis = analyze_tone(
         args.message,
-        _parse_history_arg(args.history_json),
-        memories=_parse_memories_arg(args.memories_json),
+        history,
+        memories=memories,
     )
-    print(json.dumps(analysis, ensure_ascii=False, indent=2))
+    _, runtime_analysis = build_dynamic_prompt(
+        memories,
+        None,
+        user_message=args.message,
+        history=history,
+        owner_direct_mode=True,
+        tone_analysis=analysis,
+    )
+    payload = {
+        "analysis": runtime_analysis,
+        "parallel_mode": (runtime_analysis.get("parallel_think") or {}).get("mode"),
+        "workflow_mode": (runtime_analysis.get("workflow_graph") or {}).get("mode"),
+        "workflow_executed": bool((runtime_analysis.get("workflow_graph") or {}).get("executed")),
+        "conversation_mode": (runtime_analysis.get("autogen_chat") or {}).get("mode"),
+        "conversation_executed": bool((runtime_analysis.get("autogen_chat") or {}).get("executed")),
+        "autonomy_mode": (runtime_analysis.get("superagi_autonomy") or {}).get("mode"),
+        "autonomy_started": bool((runtime_analysis.get("superagi_autonomy") or {}).get("started")),
+        "metagpt_mode": (runtime_analysis.get("metagpt_dev") or {}).get("mode"),
+        "metagpt_generated_code": bool((runtime_analysis.get("metagpt_dev") or {}).get("generated_code")),
+        "self_improve_mode": bool((runtime_analysis.get("agentic_improve") or {}).get("self_improve")),
+        "self_improve_updated": bool((runtime_analysis.get("agentic_improve") or {}).get("updated")),
+        "reflection_boost": (runtime_analysis.get("praison_reflect") or {}).get("mode_boost"),
+        "agents_health": (runtime_analysis.get("system_health") or {}).get("summary"),
+        "agents_active_count": (runtime_analysis.get("system_health") or {}).get("active_count"),
+        "tools_rag": (runtime_analysis.get("phidata_context") or {}).get("recommended_tools") or [],
+        "memory_update": bool((runtime_analysis.get("letta_update") or {}).get("updated")),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
 
 

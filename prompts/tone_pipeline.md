@@ -21,6 +21,15 @@ Astra не использует фиксированные шаблоны. Он�
 - `candidate_modes`: shortlist релевантных modes.
 - `self_reflection`: короткая внутренняя строка рассуждения (не как шаблон ответа).
 - `response_shape`: рекомендованная форма (`short_structured|warm_actionable|deep_reflective|high_energy_steps|stabilize_then_plan`).
+- `task_complex`: флаг сложной задачи (`true|false`).
+- `workflow`: флаг workflow-режима (`true|false`).
+- `conversation`: флаг диалогового multi-agent режима (`true|false`).
+- `autonomy`: флаг автономного scheduler режима (`true|false`).
+- `dev_task`: флаг dev-конвейера (`true|false`).
+- `self_improve`: флаг запуска agentic feedback loop (`true|false`).
+- `letta_recall`: блок эпизодической памяти для текущего запроса.
+- `phidata_context`: RAG-контекст по истории и инструментам.
+- `praison_reflect`: результат self-reflection loop для mode boost.
 
 ## Pipeline Stages
 
@@ -40,15 +49,36 @@ Astra не использует фиксированные шаблоны. Он�
 - На основе tone + trajectory + profile выбрать `primary_mode` и `supporting_mode` из 20+ modes.
 - Использовать mode mix, а не одиночный шаблонный режим.
 
-5. `Self-Reflection Loop`:
+5. `Complex Task Routing`:
+- Если `task_complex=true`, обязательно включить `crew_think(task, history)` в стиле CrewAI (parallel workers).
+- Результат параллельного мышления добавить в runtime prompt до финальной генерации.
+
+6. `Workflow Routing`:
+- Если `workflow=true`, обязательно включить `graph_workflow(task, history)` в стиле LangGraph (stateful nodes/edges).
+- Результат workflow-графа добавить в runtime prompt до финальной генерации.
+
+7. `Conversation Routing`:
+- Если `conversation=true`, обязательно включить `autogen_chat(task, history)` в стиле AutoGen (AssistantAgent + UserProxyAgent).
+- Результат multi-agent диалога добавить в runtime prompt до финальной генерации.
+
+8. `Autonomy + Dev Routing`:
+- Если `autonomy=true`, обязательно включить `superagi_autonomy.run(task, history)` в стиле SuperAGI (scheduler + self-task loop).
+- Если `dev_task=true`, обязательно включить `metagpt_dev.run(requirement)` в стиле MetaGPT (PRD -> Code -> Review -> Test).
+
+9. `Self-Improve Routing`:
+- Если `self_improve=true`, обязательно включить `agentic_improve.run(...)` в стиле Agentic Context Engine.
+- Результат feedback loop применить к mode-history и profile update до генерации ответа.
+
+10. `Self-Reflection Loop`:
 - Внутренне ответить на вопросы:
   - Что чувствует пользователь прямо сейчас?
   - Какой mode-mix даст максимум пользы и человечности?
   - Что релевантно из памяти?
   - Не звучит ли ответ как клише?
+- Выполнить Praison-style reflection (`agent_reflection.run(...)`) и обновить mode boost перед ответом.
 - Если ответ шаблонный, выполнить повторный цикл `full improvisation via self-reflection`.
 
-6. `Response Coupling`:
+11. `Response Coupling`:
 - Вернуть рекомендации по длине, ритму и структуре.
 - Обязать мягкий transition при смене тона.
 
@@ -74,6 +104,11 @@ Astra не использует фиксированные шаблоны. Он�
 | brevity_request | «коротко», «без воды» | short_structured |
 | depth_request | «подробно», «глубже» | deep_reflective |
 | memory_callback | «как вчера», «помнишь» | recall mode |
+| workflow_cues | «workflow», «граф», «pipeline» | включить LangGraph orchestration |
+| conversation_cues | «поговорим», «обсудим», «conversation» | включить AutoGen conversation |
+| autonomy_cues | «autonomy», «автономия», «self-task» | включить SuperAGI autonomy |
+| dev_task_cues | «напиши модуль», «feature», «code», «test» | включить MetaGPT dev pipeline |
+| self_improve_cues | «self_improve», «self improve», «self-improve», «самоулучшение», «feedback loop» | включить Agentic self-improve |
 | transition_cue | смена ритма в истории | переход между mode-mix |
 | ambiguity | неполная постановка задачи | curious/inquisitive |
 | compliance_fatigue | раздражение от бюрократии | прямой практичный тон |
@@ -100,6 +135,21 @@ type, intensity = classify_tone(signals)
 mirror_level = pick_mirror(type, intensity, history_profile)
 primary_mode, supporting_mode = select_mode_mesh(type, signals, profile_modes)
 
+if is_complex_task(user_msg, tone_analysis):
+  crew_result = crew_think(user_msg, history)
+if is_workflow_task(user_msg, tone_analysis):
+  workflow_result = graph_workflow(user_msg, history)
+if is_conversation_task(user_msg, tone_analysis):
+  autogen_result = autogen_chat(user_msg, history)
+if is_autonomy_task(user_msg, tone_analysis):
+  autonomy_result = superagi_autonomy.run(user_msg, history)
+if is_dev_task(user_msg, tone_analysis):
+  dev_result = metagpt_dev.run(user_msg, history)
+if is_self_improve_task(user_msg, tone_analysis):
+  improve_result = agentic_improve.run(user_msg, tone_analysis=tone_analysis, history=history)
+
+self_reflection_boost = agent_reflection.run(history, user_message=user_msg, tone_analysis=tone_analysis)
+
 self_reflection = compose_internal_reflection(
     type=type,
     shift=history_profile.detected_shift,
@@ -113,7 +163,9 @@ response_shape = choose_shape(type, signals, mirror_level)
 return {
   type, intensity, mirror_level, signals, recall,
   primary_mode, supporting_mode, candidate_modes,
-  self_reflection, response_shape
+  self_reflection, response_shape,
+  task_complex, workflow, conversation, autonomy, dev_task, self_improve,
+  letta_recall, phidata_context, praison_reflect, improve_result
 }
 ```
 

@@ -359,7 +359,7 @@ def _memory_payload_from_interpretation(query_text: str, memory_interpretation: 
         return None
     title = memory_interpretation.get("title") if isinstance(memory_interpretation.get("title"), str) else "Профиль пользователя"
     return {
-        "content": query_text.strip(),
+        "content": summary.strip(),
         "origin": "auto",
         "memory_payload": {
             "title": title.strip() or "Профиль пользователя",
@@ -618,7 +618,9 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
         if isinstance(profile_name, str) and profile_name.strip():
             interpreted_user_name = profile_name.strip()
     memory_payload = _memory_payload_from_interpretation(payload.query_text, memory_interpretation)
-    tone_memory_payload = build_tone_profile_memory_payload(payload.query_text, tone_analysis, profile_memories)
+    tone_memory_payload = None
+    if memory_payload is None and bool((tone_analysis or {}).get("self_improve")):
+        tone_memory_payload = build_tone_profile_memory_payload(payload.query_text, tone_analysis, profile_memories)
     memory_payload = merge_memory_payloads(memory_payload, tone_memory_payload)
 
     selected_mode = "plan_only"

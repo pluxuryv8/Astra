@@ -33,7 +33,10 @@ export default function TopBar({
             exit={{ opacity: 0, y: -6 }}
             transition={{ duration: 0.16 }}
           >
-            <Badge tone="accent">{status}</Badge>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <Badge tone="accent">{status}</Badge>
+              <Badge tone="success">Agents: 9/9 active</Badge>
+            </div>
           </motion.div>
         </AnimatePresence>
       </div>
