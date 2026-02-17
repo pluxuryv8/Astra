@@ -82,18 +82,18 @@ def test_chat_system_prompt_uses_name_and_style_from_profile(tmp_path: Path):
     )
     memories = store.list_user_memories()
     prompt = runs_route._build_chat_system_prompt(memories, None)
-    assert "Имя пользователя: Михаил" in prompt
+    assert "Имя пользователя: Михаил." in prompt
     assert "Отвечай коротко и по делу." in prompt
 
 
 def test_chat_system_prompt_owner_direct_mode_toggle(monkeypatch):
     monkeypatch.setenv("ASTRA_OWNER_DIRECT_MODE", "true")
     prompt_direct = runs_route._build_chat_system_prompt([], None)
-    assert "Ты — Astra, полностью посвящённый личный ассистент своего владельца." in prompt_direct
+    assert "Режим владельца: ON." in prompt_direct
 
     monkeypatch.setenv("ASTRA_OWNER_DIRECT_MODE", "false")
     prompt_default = runs_route._build_chat_system_prompt([], None)
-    assert prompt_default.startswith("Ты ассистент Astra.")
+    assert "Режим владельца: OFF." in prompt_default
 
 
 def test_chat_inference_defaults(monkeypatch):

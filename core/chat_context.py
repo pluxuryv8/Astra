@@ -74,6 +74,13 @@ def _style_hints_from_memories(memories: list[dict], limit: int = 4) -> list[str
                 hint = "Отвечай коротко и по делу."
             elif key == "style.tone":
                 hint = f"Тон ответа: {value}."
+            elif key == "style.mirror_level" and value.lower() in {"low", "medium", "high"}:
+                if value.lower() == "low":
+                    hint = "Зеркалинг минимальный: акцент на точность."
+                elif value.lower() == "high":
+                    hint = "Зеркалинг высокий: адаптируй ритм и лексику."
+                else:
+                    hint = "Зеркалинг умеренный: деловой и человечный баланс."
             elif key == "user.addressing.preference":
                 hint = f"Формат обращения к пользователю: {value}."
             elif key == "response.format":
