@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from copy import deepcopy
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from core import agent_reflection, agentic_improve
@@ -21,6 +23,7 @@ _PROMPT_FILES = {
     "variation_rules": "variation_rules.md",
 }
 _PROMPT_CACHE: dict[str, tuple[int, str]] = {}
+_LOG = logging.getLogger(__name__)
 
 _MODE_CATALOG: tuple[str, ...] = (
     "Supportive/Empathetic",
@@ -346,6 +349,58 @@ def _response_shape(tone_type: str, signals: dict[str, int]) -> str:
     return "balanced_direct"
 
 
+def _is_simple_query_fast_path(
+    text: str,
+    *,
+    tone_type: str,
+    signals: dict[str, int],
+    task_complex: bool,
+    workflow: bool,
+    conversation: bool,
+    autonomy: bool,
+    dev_task: bool,
+    self_improve: bool,
+) -> tuple[bool, str]:
+    normalized = (text or "").strip()
+    lowered = _normalized_text(normalized)
+    emotional_blockers = (
+        "не работает",
+        "ничего не работает",
+        "не вывожу",
+        "нет сил",
+        "устал",
+        "устала",
+        "выгорел",
+        "выгорание",
+        "сломалось",
+    )
+    if not normalized:
+        return False, "empty"
+    if tone_type in {"frustrated", "crisis", "tired"}:
+        return False, "emotional_tone"
+    if int(signals.get("fatigue", 0)) > 0:
+        return False, "fatigue"
+    if any(token in lowered for token in emotional_blockers):
+        return False, "emotional_keyword"
+    if task_complex or workflow or conversation or autonomy or dev_task or self_improve:
+        return False, "advanced_route"
+    if len(normalized) > 50:
+        return False, "length"
+    if int(signals.get("word_count", 0)) > 10:
+        return False, "word_count"
+    if int(signals.get("profanity", 0)) > 0 or int(signals.get("stress", 0)) > 0:
+        return False, "stress_or_profanity"
+    if int(signals.get("urgency", 0)) > 0 or int(signals.get("crisis_cues", 0)) > 0:
+        return False, "urgency_or_crisis"
+    if any(token in lowered for token in ("напомни", "помни", "вспомни", "remember")):
+        return False, "memory_recall"
+    if int(signals.get("question", 0)) > 1:
+        return False, "multi_question"
+    if int(signals.get("reflective_cues", 0)) > 0 or int(signals.get("creative_cues", 0)) > 0:
+        return False, "deep_dialog"
+    return True, "short_dry_simple"
+
+
 def _normalize_mode_label(value: str) -> str | None:
     raw = re.sub(r"[^a-z0-9]+", "", (value or "").lower())
     if not raw:
@@ -541,6 +596,17 @@ def analyze_tone(user_msg: str, history: list[dict], *, memories: list[dict] | N
         },
         history=history,
     )
+    simple_query, fast_path_reason = _is_simple_query_fast_path(
+        text,
+        tone_type=tone_type,
+        signals=signals,
+        task_complex=task_complex,
+        workflow=workflow,
+        conversation=conversation,
+        autonomy=autonomy,
+        dev_task=dev_task,
+        self_improve=self_improve,
+    )
 
     history_types: list[str] = []
     history_intensities: list[float] = []
@@ -571,7 +637,74 @@ def analyze_tone(user_msg: str, history: list[dict], *, memories: list[dict] | N
         "autonomy_cues": int(signals.get("autonomy_cues", 0)),
         "dev_task_cues": int(signals.get("dev_task_cues", 0)),
         "self_improve_cues": int(signals.get("self_improve_cues", 0)),
+        "fast_path_reason": fast_path_reason,
     }
+    mode_recall = retrieve_modes(history, memories=memories)
+    mode_plan = _select_modes(tone_type, signals, recall, mode_recall)
+    response_shape = _response_shape(tone_type, signals)
+
+    if simple_query:
+        recall["letta_hits"] = 0
+        recall["phidata_hits"] = 0
+        recall["praison_confidence"] = 0.0
+
+        analysis = {
+            "type": tone_type,
+            "intensity": intensity,
+            "mirror_level": _mirror_level(tone_type, intensity),
+            "signals": signals,
+            "recall": recall,
+            "primary_mode": mode_plan["primary_mode"],
+            "supporting_mode": mode_plan["supporting_mode"],
+            "candidate_modes": mode_plan["candidate_modes"],
+            "mode_history": mode_recall.get("mode_history", []),
+            "response_shape": response_shape,
+            "task_complex": task_complex,
+            "workflow": workflow,
+            "conversation": conversation,
+            "autonomy": autonomy,
+            "dev_task": dev_task,
+            "self_improve": self_improve,
+            "path": "fast",
+            "simple_query": True,
+            "fast_path_reason": fast_path_reason,
+            "letta_recall": {
+                "query": text,
+                "hit_count": 0,
+                "blocks": [],
+                "summary": "",
+            },
+            "phidata_context": {
+                "query": text,
+                "hit_count": 0,
+                "hits": [],
+                "recommended_tools": [],
+                "summary": "Fast path: direct chat without tools RAG.",
+            },
+            "praison_reflect": {
+                "updated": False,
+                "focus": "fast_path",
+                "mode_boost": "none",
+                "confidence": 0.0,
+                "steps": [],
+                "summary": "Fast path: reflection skipped for latency.",
+            },
+        }
+        analysis["self_reflection"] = _self_reflection_text(
+            tone_type,
+            intensity,
+            recall,
+            mode_plan,
+            signals,
+            task_complex=task_complex,
+            workflow=workflow,
+            conversation=conversation,
+            autonomy=autonomy,
+            dev_task=dev_task,
+            self_improve=self_improve,
+        )
+        return analysis
+
     letta_recall = letta_bridge.retrieve(history, query=text)
     recall["letta_hits"] = int(letta_recall.get("hit_count") or 0)
     phidata_context = phidata_tools.rag(history, query=text)
@@ -594,10 +727,6 @@ def analyze_tone(user_msg: str, history: list[dict], *, memories: list[dict] | N
     )
     recall["praison_confidence"] = float(praison_reflect.get("confidence") or 0.0)
 
-    mode_recall = retrieve_modes(history, memories=memories)
-    mode_plan = _select_modes(tone_type, signals, recall, mode_recall)
-    response_shape = _response_shape(tone_type, signals)
-
     analysis = {
         "type": tone_type,
         "intensity": intensity,
@@ -615,6 +744,9 @@ def analyze_tone(user_msg: str, history: list[dict], *, memories: list[dict] | N
         "autonomy": autonomy,
         "dev_task": dev_task,
         "self_improve": self_improve,
+        "path": "full",
+        "simple_query": False,
+        "fast_path_reason": fast_path_reason,
         "letta_recall": letta_recall,
         "phidata_context": phidata_context,
         "praison_reflect": praison_reflect,
@@ -1249,6 +1381,7 @@ def build_dynamic_prompt(
     owner_direct_mode: bool = True,
     tone_analysis: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    started_at = perf_counter()
     persona = load_persona_modules()
     profile_context = build_user_profile_context(memories)
     profile_block = profile_context.get("profile_block")
@@ -1262,6 +1395,74 @@ def build_dynamic_prompt(
     )
     health_report = system_health_check()
     analysis["system_health"] = health_report
+    if str(analysis.get("path") or "full") == "fast":
+        analysis["parallel_think"] = {"mode": "single", "task_complex": False, "items": [], "summary": "Fast path skip."}
+        analysis["workflow_graph"] = {
+            "mode": "single",
+            "workflow": False,
+            "executed": False,
+            "summary": "Fast path skip.",
+            "state": {},
+        }
+        analysis["autogen_chat"] = {
+            "mode": "single",
+            "conversation": False,
+            "executed": False,
+            "turns": [],
+            "summary": "Fast path skip.",
+        }
+        analysis["superagi_autonomy"] = {
+            "mode": "single",
+            "autonomy": False,
+            "started": False,
+            "tasks": [],
+            "summary": "Fast path skip.",
+        }
+        analysis["metagpt_dev"] = {
+            "mode": "single",
+            "dev_task": False,
+            "executed": False,
+            "generated_code": "",
+            "summary": "Fast path skip.",
+        }
+        analysis["agentic_improve"] = {
+            "self_improve": False,
+            "updated": False,
+            "preferences": [],
+            "summary": "Fast path skip.",
+        }
+        analysis["letta_update"] = {
+            "updated": False,
+            "digest": "",
+            "summary": "Fast path: memory update skipped.",
+            "tags": [],
+        }
+        profile_lines = f"Профиль пользователя:\n{profile_block}" if profile_block else "Профиль пользователя: пусто."
+        runtime_lines = [
+            "Fast path: ON (simple dry/short query).",
+            "Skip mods/reflection/variation for lower latency.",
+            "Rule retained: full improvisation via self-reflection.",
+            health_report.get("summary") or "Agents: status unavailable.",
+        ]
+        if user_name:
+            runtime_lines.append(f"Имя пользователя: {user_name}.")
+        if style_hints:
+            runtime_lines.append(f"Стиль из long-term профиля: {' '.join(style_hints[:3])}")
+        fast_prompt = "\n\n".join(
+            [
+                "[Core Identity]\n" + persona["core_identity"],
+                "[Fast Path Runtime]\n- " + "\n- ".join(runtime_lines),
+                "[Profile Recall]\n" + profile_lines,
+                "[Fast Path Directives]\n"
+                "- Direct answer only: no templates, no canned opener.\n"
+                "- Maintain full improvisation via self-reflection even in compact mode.\n"
+                "- If user tone becomes frustrated/crisis, switch to full path with warm mirror immediately.",
+            ]
+        )
+        elapsed_s = round(perf_counter() - started_at, 4)
+        analysis["prompt_build_latency_s"] = elapsed_s
+        _LOG.info("latency: %.4f sec", elapsed_s)
+        return fast_prompt, analysis
     if analysis.get("task_complex"):
         parallel_result = crew_think(
             user_message,
@@ -1426,6 +1627,9 @@ def build_dynamic_prompt(
             "[Profile Recall]\n- " + "\n- ".join(runtime_lines) + "\n" + profile_lines,
         ]
     )
+    elapsed_s = round(perf_counter() - started_at, 4)
+    analysis["prompt_build_latency_s"] = elapsed_s
+    _LOG.info("latency: %.4f sec", elapsed_s)
     return apply_variation(base_prompt, analysis), analysis
 
 
@@ -1494,6 +1698,8 @@ def main() -> int:
     )
     payload = {
         "analysis": runtime_analysis,
+        "path": runtime_analysis.get("path"),
+        "prompt_build_latency_s": runtime_analysis.get("prompt_build_latency_s"),
         "parallel_mode": (runtime_analysis.get("parallel_think") or {}).get("mode"),
         "workflow_mode": (runtime_analysis.get("workflow_graph") or {}).get("mode"),
         "workflow_executed": bool((runtime_analysis.get("workflow_graph") or {}).get("executed")),

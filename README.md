@@ -28,6 +28,21 @@ Randarc Astra — локальный desktop-ассистент с UI на `Taur
 ./scripts/astra dev
 ```
 
+### 2.1) Quantized Ollama model (рекомендуется для fast path)
+
+```bash
+ollama pull llama3:8b-instruct-q4_K_M
+```
+
+Рекомендуемые ENV для ускоренного chat-пути:
+
+```bash
+export ASTRA_LLM_LOCAL_CHAT_MODEL_FAST=llama3:8b-instruct-q4_K_M
+export ASTRA_LLM_OLLAMA_NUM_CTX=4096
+export ASTRA_LLM_OLLAMA_NUM_PREDICT=256
+export ASTRA_LLM_CHAT_TEMPERATURE=0.7
+```
+
 Что делает `./scripts/astra dev`:
 
 - нормализует адреса API/Bridge (`scripts/astra:9`, `scripts/astra:11`),
@@ -79,6 +94,10 @@ Randarc Astra — локальный desktop-ассистент с UI на `Taur
 | `ASTRA_AUTH_MODE` | `local` или `strict` | `local` | `apps/api/auth.py:20` |
 | `ASTRA_LLM_LOCAL_BASE_URL` | URL локальной LLM | `http://127.0.0.1:11434` | `core/brain/router.py:81` |
 | `ASTRA_LLM_LOCAL_CHAT_MODEL` | локальная chat модель | `qwen2.5:7b-instruct` | `core/brain/router.py:82` |
+| `ASTRA_LLM_LOCAL_CHAT_MODEL_FAST` | fast-tier chat модель (quantized) | `llama3:8b-instruct-q4_K_M` | `core/brain/router.py:83` |
+| `ASTRA_LLM_OLLAMA_NUM_CTX` | контекст для Ollama chat/generate | `4096` | `core/brain/router.py:90`, `core/brain/providers.py:209` |
+| `ASTRA_LLM_OLLAMA_NUM_PREDICT` | лимит генерации Ollama (`num_predict`) | `256` | `core/brain/router.py:91`, `core/brain/providers.py:210` |
+| `ASTRA_LLM_CHAT_TEMPERATURE` | chat temperature | `0.7` | `apps/api/routes/runs.py:90` |
 | `ASTRA_CLOUD_ENABLED` | разрешить cloud-route | `false` | `core/brain/router.py:76` |
 | `ASTRA_AUTO_CLOUD_ENABLED` | автопереход в cloud | `false` | `core/brain/router.py:97` |
 | `OPENAI_API_KEY` | ключ cloud провайдера | отсутствует | `core/brain/router.py:75` |

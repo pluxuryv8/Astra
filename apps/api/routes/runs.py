@@ -87,8 +87,8 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _chat_temperature_default() -> float:
-    value = _env_float("ASTRA_LLM_CHAT_TEMPERATURE", 1.0)
-    return max(0.95, min(1.05, value))
+    value = _env_float("ASTRA_LLM_CHAT_TEMPERATURE", 0.7)
+    return max(0.2, min(1.2, value))
 
 
 def _chat_top_p_default() -> float:
@@ -99,6 +99,11 @@ def _chat_top_p_default() -> float:
 def _chat_repeat_penalty_default() -> float:
     value = _env_float("ASTRA_LLM_CHAT_REPEAT_PENALTY", 1.1)
     return max(1.0, value)
+
+
+def _chat_num_predict_default() -> int:
+    value = _env_int("ASTRA_LLM_OLLAMA_NUM_PREDICT", 256)
+    return max(64, min(2048, value))
 
 
 def _owner_direct_mode_enabled() -> bool:
@@ -723,6 +728,7 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
             task_kind="chat",
             messages=build_chat_messages(system_text, history, payload.query_text),
             context_items=[ContextItem(content=payload.query_text, source_type="user_prompt", sensitivity="personal")],
+            max_tokens=_chat_num_predict_default(),
             temperature=_chat_temperature_default(),
             top_p=_chat_top_p_default(),
             repeat_penalty=_chat_repeat_penalty_default(),

@@ -47,4 +47,7 @@ def test_autogen_chat_disabled_for_non_conversation_task(tmp_path: Path, monkeyp
 
     assert analysis["conversation"] is False
     assert analysis["autogen_chat"]["mode"] == "single"
-    assert "[AutoGen Chat]" in prompt
+    if analysis.get("path") == "fast":
+        assert "[AutoGen Chat]" not in prompt
+    else:
+        assert "[AutoGen Chat]" in prompt

@@ -44,4 +44,7 @@ def test_superagi_autonomy_disabled_for_regular_task(tmp_path: Path, monkeypatch
 
     assert analysis["autonomy"] is False
     assert analysis["superagi_autonomy"]["mode"] == "single"
-    assert "[SuperAGI Autonomy]" in prompt
+    if analysis.get("path") == "fast":
+        assert "[SuperAGI Autonomy]" not in prompt
+    else:
+        assert "[SuperAGI Autonomy]" in prompt

@@ -18,6 +18,7 @@ def test_analyze_tone_detects_dry_query():
     analysis = analyze_tone("Дай формулу ковариации", [])
     assert analysis["type"] == "dry"
     assert analysis["mirror_level"] == "low"
+    assert analysis["path"] == "fast"
 
 
 def test_analyze_tone_detects_frustration_and_shift():
@@ -28,7 +29,7 @@ def test_analyze_tone_detects_frustration_and_shift():
     assert analysis["recall"]["detected_shift"] is True
 
 
-def test_build_chat_system_prompt_uses_modular_sections():
+def test_build_chat_system_prompt_uses_fast_path_for_simple_dry_query():
     prompt, analysis = build_chat_system_prompt(
         [],
         None,
@@ -37,9 +38,39 @@ def test_build_chat_system_prompt_uses_modular_sections():
         owner_direct_mode=True,
     )
     assert "[Core Identity]" in prompt
+    assert "[Tone Pipeline]" not in prompt
+    assert "[Variation Rules]" not in prompt
+    assert "[Variation Runtime]" not in prompt
+    assert analysis["type"] == "dry"
+    assert analysis["path"] == "fast"
+
+
+def test_build_chat_system_prompt_keeps_full_path_for_frustrated_query():
+    prompt, analysis = build_chat_system_prompt(
+        [],
+        None,
+        user_message="Бля, я заебался и всё бесит, помоги быстро.",
+        history=[],
+        owner_direct_mode=True,
+    )
     assert "[Tone Pipeline]" in prompt
     assert "[Variation Rules]" in prompt
-    assert analysis["type"] == "dry"
+    assert "[Variation Runtime]" in prompt
+    assert analysis["path"] == "full"
+
+
+def test_build_chat_system_prompt_keeps_full_path_for_fatigued_distress_query():
+    prompt, analysis = build_chat_system_prompt(
+        [],
+        None,
+        user_message="Я устал, ничего не работает, что делать?",
+        history=[],
+        owner_direct_mode=True,
+    )
+    assert "[Tone Pipeline]" in prompt
+    assert "[Variation Rules]" in prompt
+    assert "[Variation Runtime]" in prompt
+    assert analysis["path"] == "full"
 
 
 def test_tone_memory_payload_merges_into_existing_payload():

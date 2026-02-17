@@ -100,10 +100,12 @@ def test_chat_inference_defaults(monkeypatch):
     monkeypatch.delenv("ASTRA_LLM_CHAT_TEMPERATURE", raising=False)
     monkeypatch.delenv("ASTRA_LLM_CHAT_TOP_P", raising=False)
     monkeypatch.delenv("ASTRA_LLM_CHAT_REPEAT_PENALTY", raising=False)
+    monkeypatch.delenv("ASTRA_LLM_OLLAMA_NUM_PREDICT", raising=False)
 
-    assert runs_route._chat_temperature_default() == 1.0
+    assert runs_route._chat_temperature_default() == 0.7
     assert runs_route._chat_top_p_default() == 0.95
     assert runs_route._chat_repeat_penalty_default() == 1.1
+    assert runs_route._chat_num_predict_default() == 256
 
 
 def test_chat_soft_retry_heuristics():

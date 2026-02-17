@@ -34,6 +34,8 @@ class BrainConfig:
     local_chat_complex_model: str | None
     local_code_model: str
     local_timeout_s: int
+    local_ollama_num_ctx: int
+    local_ollama_num_predict: int
     local_fast_query_max_chars: int
     local_fast_query_max_words: int
     local_complex_query_min_chars: int
@@ -80,13 +82,15 @@ class BrainConfig:
         return cls(
             local_base_url=os.getenv("ASTRA_LLM_LOCAL_BASE_URL", "http://127.0.0.1:11434"),
             local_chat_model=os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "qwen2.5:7b-instruct"),
-            local_chat_fast_model=_env_str("ASTRA_LLM_LOCAL_CHAT_MODEL_FAST", "qwen2.5:3b-instruct"),
+            local_chat_fast_model=_env_str("ASTRA_LLM_LOCAL_CHAT_MODEL_FAST", "llama3:8b-instruct-q4_K_M"),
             local_chat_complex_model=_env_str(
                 "ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX",
                 os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "qwen2.5:7b-instruct"),
             ),
             local_code_model=os.getenv("ASTRA_LLM_LOCAL_CODE_MODEL", "deepseek-coder-v2:16b-lite-instruct-q8_0"),
             local_timeout_s=max(1, _env_int("ASTRA_LLM_LOCAL_TIMEOUT_S", 30) or 30),
+            local_ollama_num_ctx=max(1024, _env_int("ASTRA_LLM_OLLAMA_NUM_CTX", 4096) or 4096),
+            local_ollama_num_predict=max(64, _env_int("ASTRA_LLM_OLLAMA_NUM_PREDICT", 256) or 256),
             local_fast_query_max_chars=max(20, _env_int("ASTRA_LLM_FAST_QUERY_MAX_CHARS", 120) or 120),
             local_fast_query_max_words=max(3, _env_int("ASTRA_LLM_FAST_QUERY_MAX_WORDS", 18) or 18),
             local_complex_query_min_chars=max(40, _env_int("ASTRA_LLM_COMPLEX_QUERY_MIN_CHARS", 260) or 260),
@@ -414,6 +418,8 @@ class BrainRouter:
             self.config.local_chat_model,
             self.config.local_code_model,
             timeout_s=self.config.local_timeout_s,
+            default_num_ctx=self.config.local_ollama_num_ctx,
+            default_num_predict=self.config.local_ollama_num_predict,
         )
         try:
             return provider.chat(

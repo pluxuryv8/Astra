@@ -9,6 +9,8 @@ def test_llm_defaults_local_models(monkeypatch):
         "ASTRA_LLM_LOCAL_CHAT_MODEL_FAST",
         "ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX",
         "ASTRA_LLM_LOCAL_CODE_MODEL",
+        "ASTRA_LLM_OLLAMA_NUM_CTX",
+        "ASTRA_LLM_OLLAMA_NUM_PREDICT",
         "ASTRA_LLM_FAST_QUERY_MAX_CHARS",
         "ASTRA_LLM_FAST_QUERY_MAX_WORDS",
         "ASTRA_LLM_COMPLEX_QUERY_MIN_CHARS",
@@ -24,8 +26,10 @@ def test_llm_defaults_local_models(monkeypatch):
 
     cfg = BrainConfig.from_env()
     assert cfg.local_chat_model == "qwen2.5:7b-instruct"
-    assert cfg.local_chat_fast_model == "qwen2.5:3b-instruct"
+    assert cfg.local_chat_fast_model == "llama3:8b-instruct-q4_K_M"
     assert cfg.local_chat_complex_model == "qwen2.5:7b-instruct"
+    assert cfg.local_ollama_num_ctx == 4096
+    assert cfg.local_ollama_num_predict == 256
     assert cfg.local_fast_query_max_chars == 120
     assert cfg.local_fast_query_max_words == 18
     assert cfg.local_complex_query_min_chars == 260

@@ -165,11 +165,21 @@ class ProviderError(RuntimeError):
 
 
 class LocalLLMProvider:
-    def __init__(self, base_url: str, chat_model: str, code_model: str, timeout_s: int = 30) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        chat_model: str,
+        code_model: str,
+        timeout_s: int = 30,
+        default_num_ctx: int = 4096,
+        default_num_predict: int = 256,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.chat_model = chat_model
         self.code_model = code_model
         self.timeout_s = timeout_s
+        self.default_num_ctx = max(1024, int(default_num_ctx))
+        self.default_num_predict = max(64, int(default_num_predict))
 
     def chat(
         self,
@@ -197,15 +207,14 @@ class LocalLLMProvider:
             "stream": False,
             "options": {
                 "temperature": temperature,
+                "num_ctx": self.default_num_ctx,
+                "num_predict": int(max_tokens) if max_tokens is not None else self.default_num_predict,
             },
         }
         if top_p is not None:
             payload["options"]["top_p"] = top_p
         if repeat_penalty is not None:
             payload["options"]["repeat_penalty"] = repeat_penalty
-        if max_tokens is not None:
-            payload["options"]["num_predict"] = int(max_tokens)
-
         if schema:
             payload["format"] = schema
         if tools:
@@ -400,10 +409,12 @@ class LocalLLMProvider:
             "model": model,
             "prompt": prompt,
             "stream": False,
-            "options": {"temperature": temperature},
+            "options": {
+                "temperature": temperature,
+                "num_ctx": self.default_num_ctx,
+                "num_predict": int(max_tokens) if max_tokens is not None else self.default_num_predict,
+            },
         }
-        if max_tokens is not None:
-            payload["options"]["num_predict"] = int(max_tokens)
         try:
             resp = requests.post(
                 f"{self.base_url}/api/generate",

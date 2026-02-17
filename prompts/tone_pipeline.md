@@ -21,6 +21,8 @@ Astra не использует фиксированные шаблоны. Он�
 - `candidate_modes`: shortlist релевантных modes.
 - `self_reflection`: короткая внутренняя строка рассуждения (не как шаблон ответа).
 - `response_shape`: рекомендованная форма (`short_structured|warm_actionable|deep_reflective|high_energy_steps|stabilize_then_plan`).
+- `path`: режим рендеринга (`fast|full`).
+- `simple_query`: флаг fast-path кандидата (`true|false`).
 - `task_complex`: флаг сложной задачи (`true|false`).
 - `workflow`: флаг workflow-режима (`true|false`).
 - `conversation`: флаг диалогового multi-agent режима (`true|false`).
@@ -49,27 +51,32 @@ Astra не использует фиксированные шаблоны. Он�
 - На основе tone + trajectory + profile выбрать `primary_mode` и `supporting_mode` из 20+ modes.
 - Использовать mode mix, а не одиночный шаблонный режим.
 
-5. `Complex Task Routing`:
+5. `Fast Path Routing`:
+- Если `simple_query=true` и нет фрустрации/кризиса, включить `path=fast`.
+- В `fast` режиме использовать только `core_identity` + прямой ответ, без модульного оркестратора, без variation блока и без reflection-loop.
+- Даже в `fast` режиме не терять правило `full improvisation via self-reflection`: ответ не должен быть шаблонным.
+
+6. `Complex Task Routing`:
 - Если `task_complex=true`, обязательно включить `crew_think(task, history)` в стиле CrewAI (parallel workers).
 - Результат параллельного мышления добавить в runtime prompt до финальной генерации.
 
-6. `Workflow Routing`:
+7. `Workflow Routing`:
 - Если `workflow=true`, обязательно включить `graph_workflow(task, history)` в стиле LangGraph (stateful nodes/edges).
 - Результат workflow-графа добавить в runtime prompt до финальной генерации.
 
-7. `Conversation Routing`:
+8. `Conversation Routing`:
 - Если `conversation=true`, обязательно включить `autogen_chat(task, history)` в стиле AutoGen (AssistantAgent + UserProxyAgent).
 - Результат multi-agent диалога добавить в runtime prompt до финальной генерации.
 
-8. `Autonomy + Dev Routing`:
+9. `Autonomy + Dev Routing`:
 - Если `autonomy=true`, обязательно включить `superagi_autonomy.run(task, history)` в стиле SuperAGI (scheduler + self-task loop).
 - Если `dev_task=true`, обязательно включить `metagpt_dev.run(requirement)` в стиле MetaGPT (PRD -> Code -> Review -> Test).
 
-9. `Self-Improve Routing`:
+10. `Self-Improve Routing`:
 - Если `self_improve=true`, обязательно включить `agentic_improve.run(...)` в стиле Agentic Context Engine.
 - Результат feedback loop применить к mode-history и profile update до генерации ответа.
 
-10. `Self-Reflection Loop`:
+11. `Self-Reflection Loop`:
 - Внутренне ответить на вопросы:
   - Что чувствует пользователь прямо сейчас?
   - Какой mode-mix даст максимум пользы и человечности?
@@ -78,7 +85,7 @@ Astra не использует фиксированные шаблоны. Он�
 - Выполнить Praison-style reflection (`agent_reflection.run(...)`) и обновить mode boost перед ответом.
 - Если ответ шаблонный, выполнить повторный цикл `full improvisation via self-reflection`.
 
-11. `Response Coupling`:
+12. `Response Coupling`:
 - Вернуть рекомендации по длине, ритму и структуре.
 - Обязать мягкий transition при смене тона.
 
@@ -147,6 +154,9 @@ if is_dev_task(user_msg, tone_analysis):
   dev_result = metagpt_dev.run(user_msg, history)
 if is_self_improve_task(user_msg, tone_analysis):
   improve_result = agentic_improve.run(user_msg, tone_analysis=tone_analysis, history=history)
+if is_simple_query_fast_path(user_msg, tone_analysis):
+  path = "fast"
+  return core_identity_only_prompt(...)
 
 self_reflection_boost = agent_reflection.run(history, user_message=user_msg, tone_analysis=tone_analysis)
 
@@ -163,7 +173,7 @@ response_shape = choose_shape(type, signals, mirror_level)
 return {
   type, intensity, mirror_level, signals, recall,
   primary_mode, supporting_mode, candidate_modes,
-  self_reflection, response_shape,
+  self_reflection, response_shape, path, simple_query,
   task_complex, workflow, conversation, autonomy, dev_task, self_improve,
   letta_recall, phidata_context, praison_reflect, improve_result
 }

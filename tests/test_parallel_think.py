@@ -49,4 +49,7 @@ def test_parallel_think_disabled_for_simple_task(tmp_path: Path, monkeypatch):
 
     assert analysis["task_complex"] is False
     assert analysis["parallel_think"]["mode"] == "single"
-    assert "[Parallel Thinking]" in prompt
+    if analysis.get("path") == "fast":
+        assert "[Parallel Thinking]" not in prompt
+    else:
+        assert "[Parallel Thinking]" in prompt
