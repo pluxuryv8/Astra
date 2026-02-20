@@ -38,28 +38,35 @@ Auth behavior:
 | Variable | Purpose | Default | Used in |
 |---|---|---|---|
 | `ASTRA_LLM_LOCAL_BASE_URL` | Local LLM endpoint | `http://127.0.0.1:11434` | `core/brain/router.py:81` |
-| `ASTRA_LLM_LOCAL_CHAT_MODEL` | Local chat model | `qwen2.5:7b-instruct` | `core/brain/router.py:82` |
-| `ASTRA_LLM_LOCAL_CHAT_MODEL_FAST` | Fast local chat model | `qwen2.5:3b-instruct` | `core/brain/router.py:83` |
-| `ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX` | Complex local chat model | falls back to `ASTRA_LLM_LOCAL_CHAT_MODEL` | `core/brain/router.py:84` |
-| `ASTRA_LLM_LOCAL_CODE_MODEL` | Local code model | `deepseek-coder-v2:16b-lite-instruct-q8_0` | `core/brain/router.py:88` |
-| `ASTRA_LLM_LOCAL_TIMEOUT_S` | Local model timeout (seconds) | `30` | `core/brain/router.py:89` |
-| `ASTRA_LLM_FAST_QUERY_MAX_CHARS` | Fast-model char threshold | `120` | `core/brain/router.py:90` |
-| `ASTRA_LLM_FAST_QUERY_MAX_WORDS` | Fast-model words threshold | `18` | `core/brain/router.py:91` |
-| `ASTRA_LLM_COMPLEX_QUERY_MIN_CHARS` | Complex-model char threshold | `260` | `core/brain/router.py:92` |
-| `ASTRA_LLM_COMPLEX_QUERY_MIN_WORDS` | Complex-model words threshold | `45` | `core/brain/router.py:93` |
-| `ASTRA_LLM_CLOUD_BASE_URL` | Cloud LLM base URL | `https://api.openai.com/v1` | `core/brain/router.py:94` |
-| `ASTRA_LLM_CLOUD_MODEL` | Cloud model | `gpt-4.1` | `core/brain/router.py:95` |
+| `ASTRA_LLM_LOCAL_CHAT_MODEL` | Local chat model | `llama2-uncensored:7b` | `core/brain/router.py:85` |
+| `ASTRA_LLM_LOCAL_CHAT_MODEL_FAST` | Fast local chat model | `llama2-uncensored:7b` | `core/brain/router.py:86` |
+| `ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX` | Complex local chat model | `wizardlm-uncensored:13b` | `core/brain/router.py:88` |
+| `ASTRA_LLM_LOCAL_CODE_MODEL` | Local code model | `deepseek-coder-v2:16b-lite-instruct-q8_0` | `core/brain/router.py:91` |
+| `ASTRA_LLM_LOCAL_TIMEOUT_S` | Local model timeout (seconds) | `30` | `core/brain/router.py:92` |
+| `ASTRA_LLM_FAST_QUERY_MAX_CHARS` | Fast-model char threshold | `120` | `core/brain/router.py:95` |
+| `ASTRA_LLM_FAST_QUERY_MAX_WORDS` | Fast-model words threshold | `18` | `core/brain/router.py:96` |
+| `ASTRA_LLM_COMPLEX_QUERY_MIN_CHARS` | Complex-model char threshold | `260` | `core/brain/router.py:97` |
+| `ASTRA_LLM_COMPLEX_QUERY_MIN_WORDS` | Complex-model words threshold | `45` | `core/brain/router.py:98` |
+| `ASTRA_LLM_CLOUD_BASE_URL` | Cloud LLM base URL | `https://api.openai.com/v1` | `core/brain/router.py:99` |
+| `ASTRA_LLM_CLOUD_MODEL` | Cloud model | `gpt-4.1` | `core/brain/router.py:100` |
 | `ASTRA_CLOUD_ENABLED` | Enable cloud route | `false` | `core/brain/router.py:76`, `core/brain/router.py:194` |
 | `ASTRA_AUTO_CLOUD_ENABLED` | Auto-switch local -> cloud | `false` | `core/brain/router.py:97`, `core/brain/router.py:196` |
 | `OPENAI_API_KEY` | Cloud API key | none | `core/brain/router.py:75`, `core/brain/router.py:457` |
-| `ASTRA_LLM_MAX_CONCURRENCY` | LLM parallelism | `1` | `core/brain/router.py:98` |
-| `ASTRA_LLM_MAX_RETRIES` | Cloud retries | `3` | `core/brain/router.py:99` |
-| `ASTRA_LLM_BACKOFF_BASE_MS` | Retry backoff base | `350` | `core/brain/router.py:100` |
-| `ASTRA_LLM_BUDGET_PER_RUN` | Budget per run | none | `core/brain/router.py:101` |
-| `ASTRA_LLM_BUDGET_PER_STEP` | Budget per step | none | `core/brain/router.py:102` |
-| `ASTRA_OWNER_DIRECT_MODE` | Chat system prompt mode | `true` | `apps/api/routes/runs.py:112` |
-| `ASTRA_CHAT_FAST_PATH_ENABLED` | Skip semantic pass for short safe chat | `true` | `apps/api/routes/runs.py:116` |
-| `ASTRA_CHAT_FAST_PATH_MAX_CHARS` | Fast-chat max chars | `220` | `apps/api/routes/runs.py:120` |
+| `ASTRA_LLM_MAX_CONCURRENCY` | LLM parallelism | `1` | `core/brain/router.py:103` |
+| `ASTRA_LLM_CHAT_PRIORITY_EXTRA_SLOTS` | Extra queue slots reserved for chat requests (`purpose=chat_response`) | `1` | `core/brain/router.py:104`, `core/brain/router.py:113` |
+| `ASTRA_LLM_CHAT_TIER_TIMEOUT_S` | Timeout (seconds) for fast/complex tier chat model before fallback to base chat model | `20` | `core/brain/router.py:105`, `core/brain/router.py:460` |
+| `ASTRA_LLM_MAX_RETRIES` | Cloud retries | `3` | `core/brain/router.py:105` |
+| `ASTRA_LLM_BACKOFF_BASE_MS` | Retry backoff base | `350` | `core/brain/router.py:106` |
+| `ASTRA_LLM_BUDGET_PER_RUN` | Budget per run | none | `core/brain/router.py:107` |
+| `ASTRA_LLM_BUDGET_PER_STEP` | Budget per step | none | `core/brain/router.py:108` |
+| `ASTRA_OWNER_DIRECT_MODE` | Chat system prompt mode | `true` | `apps/api/routes/runs.py:113` |
+| `ASTRA_CHAT_FAST_PATH_ENABLED` | Skip semantic pass for short safe chat | `true` | `apps/api/routes/runs.py:117` |
+| `ASTRA_CHAT_FAST_PATH_MAX_CHARS` | Fast-chat max chars | `220` | `apps/api/routes/runs.py:121` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_ENABLED` | Enable auto web research for uncertain/off-topic chat answers | `true` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_DEPTH` | Auto web research depth (`brief`, `normal`, `deep`) | `brief` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_ROUNDS` | Max research rounds in auto mode | `2` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_SOURCES` | Max total sources in auto mode | `6` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_PAGES` | Max fetched pages in auto mode | `4` | `apps/api/routes/runs.py` |
 | `ASTRA_QA_MODE` | QA deterministic mode | `false` | `apps/api/routes/runs.py:154`, `core/planner.py:91` |
 | `ASTRA_LEGACY_DETECTORS` | Enable legacy planner detectors | `false` | `core/planner.py:97` |
 

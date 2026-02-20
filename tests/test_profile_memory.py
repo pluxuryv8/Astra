@@ -102,13 +102,62 @@ def test_chat_inference_defaults(monkeypatch):
     monkeypatch.delenv("ASTRA_LLM_CHAT_REPEAT_PENALTY", raising=False)
     monkeypatch.delenv("ASTRA_LLM_OLLAMA_NUM_PREDICT", raising=False)
 
-    assert runs_route._chat_temperature_default() == 0.7
-    assert runs_route._chat_top_p_default() == 0.95
-    assert runs_route._chat_repeat_penalty_default() == 1.1
+    assert runs_route._chat_temperature_default() == 0.35
+    assert runs_route._chat_top_p_default() == 0.9
+    assert runs_route._chat_repeat_penalty_default() == 1.15
     assert runs_route._chat_num_predict_default() == 256
 
 
 def test_chat_soft_retry_heuristics():
-    assert runs_route._needs_soft_retry("Как ИИ я не могу помочь в этом.")
-    assert runs_route._needs_soft_retry("Сделай следующее...")
-    assert not runs_route._needs_soft_retry("Вот полный ответ по шагам.")
+    assert runs_route._soft_retry_reason("Сделай это", "Как ИИ я не могу помочь в этом.") == "unwanted_prefix"
+    assert runs_route._soft_retry_reason("Сделай это", "Сделай следующее...") == "truncated"
+    assert runs_route._soft_retry_reason("Привет, как дела?", "Hello there") == "ru_language_mismatch"
+    assert (
+        runs_route._soft_retry_reason(
+            "Как пытали канеки Кена в токийском гуле",
+            "Давайте сначала поговорим о текущей проблеме.",
+        )
+        == "off_topic"
+    )
+    assert (
+        runs_route._soft_retry_reason(
+            "Как пытали канеки Кена в токийском гуле",
+            "В 1980 году я попал на вечеринку в Токио и пытался выпить из канеки Кена.",
+        )
+        == "off_topic"
+    )
+    assert (
+        runs_route._soft_retry_reason(
+            "Как пытали канеки Кена в токийском гуле",
+            "Пока не слышала, но предполагаю, что это было намного интереснее, чем обычный гул.",
+        )
+        == "off_topic"
+    )
+    assert (
+        runs_route._soft_retry_reason(
+            "А сюжет хентая эйфория знаешь?",
+            "Хентай - жанр с элементами фантастического сюжета и различными стилями.",
+        )
+        == "off_topic"
+    )
+    assert runs_route._soft_retry_reason("Привет, как дела?", "Привет! Всё нормально.") is None
+
+
+def test_auto_web_research_trigger_heuristics(monkeypatch):
+    monkeypatch.setenv("ASTRA_CHAT_AUTO_WEB_RESEARCH_ENABLED", "true")
+
+    assert runs_route._should_auto_web_research(
+        "А сюжет хентая эйфория знаешь?",
+        "Хентай - жанр с элементами фантастического сюжета и различными стилями.",
+        error_type=None,
+    )
+    assert runs_route._should_auto_web_research(
+        "Кто такой Кен Канеки?",
+        "Не знаю точно, возможно это персонаж аниме.",
+        error_type=None,
+    )
+    assert not runs_route._should_auto_web_research(
+        "привет",
+        "Не знаю.",
+        error_type=None,
+    )

@@ -28,19 +28,26 @@ Randarc Astra — локальный desktop-ассистент с UI на `Taur
 ./scripts/astra dev
 ```
 
-### 2.1) Quantized Ollama model (рекомендуется для fast path)
+### 2.1) Recommended local uncensored models
 
 ```bash
-ollama pull llama3:8b-instruct-q4_K_M
+ollama pull llama2-uncensored:7b
+ollama pull dolphin-mixtral:8x7b
+ollama pull wizardlm-uncensored:13b
 ```
 
-Рекомендуемые ENV для ускоренного chat-пути:
+Рекомендуемые ENV:
 
 ```bash
-export ASTRA_LLM_LOCAL_CHAT_MODEL_FAST=llama3:8b-instruct-q4_K_M
+export ASTRA_LLM_LOCAL_CHAT_MODEL=llama2-uncensored:7b
+export ASTRA_LLM_LOCAL_CHAT_MODEL_FAST=llama2-uncensored:7b
+export ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX=wizardlm-uncensored:13b
 export ASTRA_LLM_OLLAMA_NUM_CTX=4096
 export ASTRA_LLM_OLLAMA_NUM_PREDICT=256
-export ASTRA_LLM_CHAT_TEMPERATURE=0.7
+export ASTRA_LLM_CHAT_TEMPERATURE=0.35
+export ASTRA_LLM_CHAT_TOP_P=0.9
+export ASTRA_LLM_CHAT_REPEAT_PENALTY=1.15
+export ASTRA_LLM_CHAT_TIER_TIMEOUT_S=20
 ```
 
 Что делает `./scripts/astra dev`:
@@ -93,11 +100,18 @@ export ASTRA_LLM_CHAT_TEMPERATURE=0.7
 | `ASTRA_DATA_DIR` | Директория данных (`.astra`) | `<ASTRA_BASE_DIR>/.astra` | `apps/api/config.py:17` |
 | `ASTRA_AUTH_MODE` | `local` или `strict` | `local` | `apps/api/auth.py:20` |
 | `ASTRA_LLM_LOCAL_BASE_URL` | URL локальной LLM | `http://127.0.0.1:11434` | `core/brain/router.py:81` |
-| `ASTRA_LLM_LOCAL_CHAT_MODEL` | локальная chat модель | `qwen2.5:7b-instruct` | `core/brain/router.py:82` |
-| `ASTRA_LLM_LOCAL_CHAT_MODEL_FAST` | fast-tier chat модель (quantized) | `llama3:8b-instruct-q4_K_M` | `core/brain/router.py:83` |
+| `ASTRA_LLM_LOCAL_CHAT_MODEL` | локальная chat модель | `llama2-uncensored:7b` | `core/brain/router.py:85` |
+| `ASTRA_LLM_LOCAL_CHAT_MODEL_FAST` | fast-tier chat модель | `llama2-uncensored:7b` | `core/brain/router.py:86` |
+| `ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX` | complex-tier chat модель | `wizardlm-uncensored:13b` | `core/brain/router.py:88` |
 | `ASTRA_LLM_OLLAMA_NUM_CTX` | контекст для Ollama chat/generate | `4096` | `core/brain/router.py:90`, `core/brain/providers.py:209` |
 | `ASTRA_LLM_OLLAMA_NUM_PREDICT` | лимит генерации Ollama (`num_predict`) | `256` | `core/brain/router.py:91`, `core/brain/providers.py:210` |
-| `ASTRA_LLM_CHAT_TEMPERATURE` | chat temperature | `0.7` | `apps/api/routes/runs.py:90` |
+| `ASTRA_LLM_CHAT_TEMPERATURE` | chat temperature | `0.35` | `apps/api/routes/runs.py:94` |
+| `ASTRA_LLM_CHAT_TIER_TIMEOUT_S` | timeout (сек) для tier-модели в chat-response перед fallback на base-модель | `20` | `core/brain/router.py:105`, `core/brain/router.py:460` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_ENABLED` | auto web research в `CHAT` при off-topic/неуверенном ответе | `true` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_DEPTH` | глубина auto web research (`brief`/`normal`/`deep`) | `brief` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_ROUNDS` | max раундов auto web research | `2` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_SOURCES` | max источников для auto web research | `6` | `apps/api/routes/runs.py` |
+| `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_PAGES` | max страниц для fetch в auto web research | `4` | `apps/api/routes/runs.py` |
 | `ASTRA_CLOUD_ENABLED` | разрешить cloud-route | `false` | `core/brain/router.py:76` |
 | `ASTRA_AUTO_CLOUD_ENABLED` | автопереход в cloud | `false` | `core/brain/router.py:97` |
 | `OPENAI_API_KEY` | ключ cloud провайдера | отсутствует | `core/brain/router.py:75` |

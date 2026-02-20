@@ -16,6 +16,7 @@ from apps.api.main import create_app
 from apps.api.routes import runs as runs_route
 from core.brain.providers import ProviderError
 from core.brain.types import LLMResponse
+from core.skills.result_types import ArtifactCandidate, SkillResult, SourceCandidate
 from core.semantic.decision import (
     SemanticDecision,
     SemanticDecisionError,
@@ -48,6 +49,21 @@ class FakeChatBrain:
     def call(self, request, ctx=None):
         return LLMResponse(
             text="Ок.",
+            usage=None,
+            provider="local",
+            model_id="fake",
+            latency_ms=1,
+            cache_hit=False,
+            route_reason="test",
+            status="ok",
+            error_type=None,
+        )
+
+
+class FakeUncertainChatBrain:
+    def call(self, request, ctx=None):
+        return LLMResponse(
+            text="Не знаю точно, возможно тут нужно проверить источники.",
             usage=None,
             provider="local",
             model_id="fake",
@@ -349,6 +365,78 @@ def test_chat_llm_timeout_degrades_to_fallback_chat(monkeypatch, tmp_path: Path)
     event_types = [item.get("type") for item in events]
     assert "chat_response_generated" in event_types
     assert "run_failed" not in event_types
+
+
+def test_chat_uncertain_response_uses_auto_web_research(monkeypatch, tmp_path: Path):
+    _init_store(tmp_path)
+    monkeypatch.setenv("ASTRA_CHAT_AUTO_WEB_RESEARCH_ENABLED", "true")
+    monkeypatch.setattr(runs_route, "get_brain", lambda: FakeUncertainChatBrain())
+    monkeypatch.setattr(
+        runs_route,
+        "interpret_user_message_for_memory",
+        lambda *args, **kwargs: _memory_interpretation(should_store=False),
+    )
+    monkeypatch.setattr(
+        intent_router,
+        "decide_semantic",
+        lambda *args, **kwargs: _semantic(intent="CHAT"),
+    )
+
+    answer_path = tmp_path / "web_research_answer.md"
+    answer_path.write_text("Кен Канеки - главный герой манги и аниме Tokyo Ghoul.", encoding="utf-8")
+
+    def _fake_web_research(_inputs, _ctx):  # noqa: ANN001
+        return SkillResult(
+            what_i_did="Проведён web research: прочитано 1 страниц, раундов 1",
+            sources=[SourceCandidate(url="https://example.org/tokyo-ghoul", title="Tokyo Ghoul Wiki")],
+            artifacts=[
+                ArtifactCandidate(
+                    type="web_research_answer_md",
+                    title="Web Research Answer",
+                    content_uri=str(answer_path),
+                    meta={},
+                )
+            ],
+            events=[
+                {
+                    "type": "task_progress",
+                    "message": "Раунд 1/1: поиск источников",
+                    "reason_code": "search_round_started",
+                    "query": "Кто такой Кен Канеки?",
+                    "progress": {"current": 1, "total": 1, "unit": "round"},
+                }
+            ],
+            confidence=0.9,
+        )
+
+    monkeypatch.setattr(runs_route.web_research_skill, "run", _fake_web_research)
+
+    client = TestClient(create_app())
+    headers = _bootstrap(client)
+    project = client.post("/api/v1/projects", json={"name": "semantic", "tags": [], "settings": {}}, headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={"query_text": "Кто такой Кен Канеки?", "mode": "plan_only"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "chat"
+    assert "Кен Канеки" in payload["chat_response"]
+    assert "https://example.org/tokyo-ghoul" in payload["chat_response"]
+
+    events = store.list_events(payload["run"]["id"], limit=80)
+    chat_events = [item for item in events if item.get("type") == "chat_response_generated"]
+    assert chat_events
+    last_payload = chat_events[-1].get("payload") or {}
+    assert last_payload.get("provider") == "web_research"
+    assert any(
+        item.get("type") == "task_progress"
+        and (item.get("payload") or {}).get("reason_code") == "search_round_started"
+        and (item.get("payload") or {}).get("query") == "Кто такой Кен Канеки?"
+        for item in events
+    )
 
 
 def test_fast_chat_path_skips_semantic_and_memory_interpreter(monkeypatch, tmp_path: Path):

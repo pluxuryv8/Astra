@@ -4,9 +4,9 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DATA_DIR="${ASTRA_DATA_DIR:-$ROOT_DIR/.astra}"
 MODELS_DIR="$DATA_DIR/models"
-CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:7b-instruct}"
-CHAT_FAST_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_FAST:-qwen2.5:3b-instruct}"
-CHAT_COMPLEX_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX:-$CHAT_MODEL}"
+CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-llama2-uncensored:7b}"
+CHAT_FAST_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_FAST:-llama2-uncensored:7b}"
+CHAT_COMPLEX_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX:-wizardlm-uncensored:13b}"
 CODE_MODEL="${ASTRA_LLM_LOCAL_CODE_MODEL:-deepseek-coder-v2:16b-lite-instruct-q8_0}"
 LEGACY_SAIGA_GGUF_PATH="$MODELS_DIR/saiga_nemo_12b.gguf"
 
@@ -42,18 +42,32 @@ pull_model() {
   ollama pull "$model"
 }
 
-install_chat_models() {
-  local models=("$CHAT_MODEL" "$CHAT_FAST_MODEL" "$CHAT_COMPLEX_MODEL")
-  local model
-  declare -A seen=()
-  for model in "${models[@]}"; do
-    [ -z "$model" ] && continue
-    if [[ -n "${seen[$model]:-}" ]]; then
+unique_non_empty_models() {
+  local input
+  local seen_lines=""
+  for input in "$@"; do
+    [ -z "$input" ] && continue
+    if [ -n "$seen_lines" ] && printf "%s\n" "$seen_lines" | grep -Fxq "$input"; then
       continue
     fi
-    seen["$model"]=1
-    pull_model "$model"
+    if [ -n "$seen_lines" ]; then
+      seen_lines="${seen_lines}
+$input"
+    else
+      seen_lines="$input"
+    fi
   done
+  if [ -n "$seen_lines" ]; then
+    printf "%s\n" "$seen_lines"
+  fi
+}
+
+install_chat_models() {
+  local model
+  while IFS= read -r model; do
+    [ -z "$model" ] && continue
+    pull_model "$model"
+  done < <(unique_non_empty_models "$CHAT_MODEL" "$CHAT_FAST_MODEL" "$CHAT_COMPLEX_MODEL")
 }
 
 install_deepseek() {
@@ -64,22 +78,16 @@ verify_models() {
   local list
   list="$(ollama list | awk 'NR>1 {print $1}')"
   local missing=0
-  local models=("$CHAT_MODEL" "$CHAT_FAST_MODEL" "$CHAT_COMPLEX_MODEL" "$CODE_MODEL")
   local model
-  declare -A seen=()
-  for model in "${models[@]}"; do
+  while IFS= read -r model; do
     [ -z "$model" ] && continue
-    if [[ -n "${seen[$model]:-}" ]]; then
-      continue
-    fi
-    seen["$model"]=1
     local normalized
     normalized="$(normalize_name "$model")"
     if ! printf "%s\n" "$list" | grep -Fxq "$model" && ! printf "%s\n" "$list" | grep -Fxq "$normalized"; then
       warn "Missing model: $model"
       missing=1
     fi
-  done
+  done < <(unique_non_empty_models "$CHAT_MODEL" "$CHAT_FAST_MODEL" "$CHAT_COMPLEX_MODEL" "$CODE_MODEL")
   if [ "$missing" -eq 0 ]; then
     ok "Models present: chat=$CHAT_MODEL fast=$CHAT_FAST_MODEL complex=$CHAT_COMPLEX_MODEL code=$CODE_MODEL"
     return 0

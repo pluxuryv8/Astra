@@ -1,0 +1,354 @@
+{
+  "model": "qwen2.5:3b-instruct",
+  "max_tokens": 32,
+  "runs_per_query": 3,
+  "summary_rows": [
+    {
+      "query": "simple_1",
+      "message": "Дай формулу",
+      "before_prompt_s_avg": 0.005,
+      "after_prompt_s_avg": 0.001,
+      "before_llm_s_avg": 21.081,
+      "after_llm_s_avg": 6.625,
+      "before_path": null,
+      "after_path": "fast"
+    },
+    {
+      "query": "simple_2",
+      "message": "Сколько будет 2+2?",
+      "before_prompt_s_avg": 0.004,
+      "after_prompt_s_avg": 0.0,
+      "before_llm_s_avg": 18.759,
+      "after_llm_s_avg": 0.707,
+      "before_path": null,
+      "after_path": "fast"
+    },
+    {
+      "query": "simple_3",
+      "message": "Определи HTTP",
+      "before_prompt_s_avg": 0.003,
+      "after_prompt_s_avg": 0.0,
+      "before_llm_s_avg": 20.237,
+      "after_llm_s_avg": 2.462,
+      "before_path": null,
+      "after_path": "fast"
+    },
+    {
+      "query": "frustrated_1",
+      "message": "Бля, я заебался, помоги быстро.",
+      "before_prompt_s_avg": 0.003,
+      "after_prompt_s_avg": 0.005,
+      "before_llm_s_avg": 20.616,
+      "after_llm_s_avg": 29.418,
+      "before_path": null,
+      "after_path": "full"
+    },
+    {
+      "query": "frustrated_2",
+      "message": "Я устал, ничего не работает, что делать?",
+      "before_prompt_s_avg": 0.004,
+      "after_prompt_s_avg": 0.008,
+      "before_llm_s_avg": 22.639,
+      "after_llm_s_avg": 25.399,
+      "before_path": null,
+      "after_path": "full"
+    }
+  ],
+  "raw_results": {
+    "before": {
+      "simple_1": [
+        {
+          "prompt_build_s": 0.004997749987524003,
+          "path": null,
+          "llm_elapsed_s": 19.280212500016205,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 19279,
+          "text_len": 104
+        },
+        {
+          "prompt_build_s": 0.0041360409813933074,
+          "path": null,
+          "llm_elapsed_s": 21.075528541987296,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 21075,
+          "text_len": 120
+        },
+        {
+          "prompt_build_s": 0.004403540981002152,
+          "path": null,
+          "llm_elapsed_s": 22.88874008395942,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 22888,
+          "text_len": 73
+        }
+      ],
+      "simple_2": [
+        {
+          "prompt_build_s": 0.002984457998536527,
+          "path": null,
+          "llm_elapsed_s": 19.318247374962084,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 19317,
+          "text_len": 18
+        },
+        {
+          "prompt_build_s": 0.0031508340034633875,
+          "path": null,
+          "llm_elapsed_s": 18.34535004099598,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 18345,
+          "text_len": 12
+        },
+        {
+          "prompt_build_s": 0.004856417013797909,
+          "path": null,
+          "llm_elapsed_s": 18.6137424170156,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 18613,
+          "text_len": 12
+        }
+      ],
+      "simple_3": [
+        {
+          "prompt_build_s": 0.00271929195150733,
+          "path": null,
+          "llm_elapsed_s": 20.13867804198526,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 20136,
+          "text_len": 91
+        },
+        {
+          "prompt_build_s": 0.0027998749865218997,
+          "path": null,
+          "llm_elapsed_s": 20.57588320900686,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 20575,
+          "text_len": 118
+        },
+        {
+          "prompt_build_s": 0.002768457983620465,
+          "path": null,
+          "llm_elapsed_s": 19.997561625030357,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 19997,
+          "text_len": 123
+        }
+      ],
+      "frustrated_1": [
+        {
+          "prompt_build_s": 0.0027837909874506295,
+          "path": null,
+          "llm_elapsed_s": 20.086415584024508,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 20086,
+          "text_len": 62
+        },
+        {
+          "prompt_build_s": 0.003687040996737778,
+          "path": null,
+          "llm_elapsed_s": 20.760880290996283,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 20760,
+          "text_len": 63
+        },
+        {
+          "prompt_build_s": 0.0029908749856986105,
+          "path": null,
+          "llm_elapsed_s": 20.99998633400537,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 20999,
+          "text_len": 106
+        }
+      ],
+      "frustrated_2": [
+        {
+          "prompt_build_s": 0.00423391698859632,
+          "path": null,
+          "llm_elapsed_s": 23.318204290990252,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 23317,
+          "text_len": 119
+        },
+        {
+          "prompt_build_s": 0.005049958010204136,
+          "path": null,
+          "llm_elapsed_s": 22.20517133298563,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 22204,
+          "text_len": 108
+        },
+        {
+          "prompt_build_s": 0.0028420420130714774,
+          "path": null,
+          "llm_elapsed_s": 22.394997707975563,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 22394,
+          "text_len": 109
+        }
+      ]
+    },
+    "after": {
+      "simple_1": [
+        {
+          "prompt_build_s": 0.0008469169843010604,
+          "path": "fast",
+          "llm_elapsed_s": 15.021666666958481,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 15021,
+          "text_len": 107
+        },
+        {
+          "prompt_build_s": 0.0008759169722907245,
+          "path": "fast",
+          "llm_elapsed_s": 2.4141802500234917,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 2413,
+          "text_len": 116
+        },
+        {
+          "prompt_build_s": 0.00030670897103846073,
+          "path": "fast",
+          "llm_elapsed_s": 2.437776083999779,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 2437,
+          "text_len": 105
+        }
+      ],
+      "simple_2": [
+        {
+          "prompt_build_s": 0.0003028750070370734,
+          "path": "fast",
+          "llm_elapsed_s": 0.764384042005986,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 764,
+          "text_len": 12
+        },
+        {
+          "prompt_build_s": 0.0003292079782113433,
+          "path": "fast",
+          "llm_elapsed_s": 0.6637230840278789,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 663,
+          "text_len": 14
+        },
+        {
+          "prompt_build_s": 0.0003471249947324395,
+          "path": "fast",
+          "llm_elapsed_s": 0.6922820410109125,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 692,
+          "text_len": 14
+        }
+      ],
+      "simple_3": [
+        {
+          "prompt_build_s": 0.0003424579626880586,
+          "path": "fast",
+          "llm_elapsed_s": 2.6795757089857943,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 2679,
+          "text_len": 120
+        },
+        {
+          "prompt_build_s": 0.00033054198138415813,
+          "path": "fast",
+          "llm_elapsed_s": 2.3690199170378037,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 2368,
+          "text_len": 139
+        },
+        {
+          "prompt_build_s": 0.0003370000049471855,
+          "path": "fast",
+          "llm_elapsed_s": 2.336444416025188,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 2336,
+          "text_len": 112
+        }
+      ],
+      "frustrated_1": [
+        {
+          "prompt_build_s": 0.003881332988385111,
+          "path": "full",
+          "llm_elapsed_s": 23.47111458296422,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 23470,
+          "text_len": 59
+        },
+        {
+          "prompt_build_s": 0.004705041996203363,
+          "path": "full",
+          "llm_elapsed_s": 34.30061858298723,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 34300,
+          "text_len": 89
+        },
+        {
+          "prompt_build_s": 0.006909375020768493,
+          "path": "full",
+          "llm_elapsed_s": 30.481844375026412,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 30481,
+          "text_len": 62
+        }
+      ],
+      "frustrated_2": [
+        {
+          "prompt_build_s": 0.01780445798067376,
+          "path": "full",
+          "llm_elapsed_s": 24.62657050002599,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 24624,
+          "text_len": 108
+        },
+        {
+          "prompt_build_s": 0.0028637920040637255,
+          "path": "full",
+          "llm_elapsed_s": 23.206403415999375,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 23206,
+          "text_len": 61
+        },
+        {
+          "prompt_build_s": 0.0036414999631233513,
+          "path": "full",
+          "llm_elapsed_s": 28.365514791978057,
+          "provider": "local",
+          "model": "qwen2.5:3b-instruct",
+          "latency_ms": 28365,
+          "text_len": 101
+        }
+      ]
+    }
+  },
+  "errors": []
+}

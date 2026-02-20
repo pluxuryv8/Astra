@@ -196,11 +196,13 @@ class LocalLLMProvider:
         run_id: str | None = None,
         step_id: str | None = None,
         purpose: str | None = None,
+        timeout_s: int | None = None,
     ) -> ProviderResult:
         model = model or (self.code_model if model_kind == "code" else self.chat_model)
         normalized_messages = _normalize_messages(messages)
         schema = _normalize_json_schema(json_schema)
-        allow_generate_fallback = schema is None and not tools
+        effective_timeout = max(1, int(timeout_s if timeout_s is not None else self.timeout_s))
+        allow_generate_fallback = schema is None and not tools and not str(purpose or "").startswith("chat_response")
         payload: dict[str, Any] = {
             "model": model,
             "messages": normalized_messages,
@@ -224,7 +226,7 @@ class LocalLLMProvider:
             resp = requests.post(
                 f"{self.base_url}/api/chat",
                 json=payload,
-                timeout=self.timeout_s,
+                timeout=effective_timeout,
             )
         except requests.RequestException as exc:
             if allow_generate_fallback:
@@ -236,6 +238,7 @@ class LocalLLMProvider:
                     run_id=run_id,
                     step_id=step_id,
                     purpose=purpose,
+                    timeout_s=effective_timeout,
                 )
             raise ProviderError(f"Local LLM request failed: {exc}", provider="local", error_type="connection_error") from exc
 
@@ -250,6 +253,18 @@ class LocalLLMProvider:
                 purpose=purpose,
                 variant="primary",
             )
+            if not allow_generate_fallback:
+                error_text = _extract_error_text(resp)
+                message = f"Local LLM HTTP {resp.status_code}"
+                if error_text:
+                    message = f"{message}: {error_text}"
+                raise ProviderError(
+                    message,
+                    provider="local",
+                    status_code=resp.status_code,
+                    error_type="http_error",
+                    artifact_path=artifact_path,
+                )
             simplified_payload: dict[str, Any] = {
                 "model": model,
                 "messages": normalized_messages,
@@ -259,7 +274,7 @@ class LocalLLMProvider:
                 retry_resp = requests.post(
                     f"{self.base_url}/api/chat",
                     json=simplified_payload,
-                    timeout=self.timeout_s,
+                    timeout=effective_timeout,
                 )
             except requests.RequestException as exc:
                 if allow_generate_fallback:
@@ -271,6 +286,7 @@ class LocalLLMProvider:
                         run_id=run_id,
                         step_id=step_id,
                         purpose=purpose,
+                        timeout_s=effective_timeout,
                     )
                 raise ProviderError(
                     f"Local LLM request failed: {exc}",
@@ -288,6 +304,7 @@ class LocalLLMProvider:
                         run_id=run_id,
                         step_id=step_id,
                         purpose=purpose,
+                        timeout_s=effective_timeout,
                     )
                 error_text = _extract_error_text(retry_resp)
                 hint = _missing_model_hint(error_text)
@@ -325,6 +342,7 @@ class LocalLLMProvider:
                         run_id=run_id,
                         step_id=step_id,
                         purpose=purpose,
+                        timeout_s=effective_timeout,
                     )
                 raise ProviderError(
                     "Local LLM returned invalid JSON",
@@ -381,6 +399,7 @@ class LocalLLMProvider:
                     run_id=run_id,
                     step_id=step_id,
                     purpose=purpose,
+                    timeout_s=effective_timeout,
                 )
             raise ProviderError("Local LLM returned invalid JSON", provider="local", status_code=resp.status_code, error_type="invalid_json") from exc
 
@@ -403,6 +422,7 @@ class LocalLLMProvider:
         run_id: str | None,
         step_id: str | None,
         purpose: str | None,
+        timeout_s: int,
     ) -> ProviderResult:
         prompt = _messages_to_prompt(normalized_messages)
         payload: dict[str, Any] = {
@@ -419,7 +439,7 @@ class LocalLLMProvider:
             resp = requests.post(
                 f"{self.base_url}/api/generate",
                 json=payload,
-                timeout=self.timeout_s,
+                timeout=timeout_s,
             )
         except requests.RequestException as exc:
             raise ProviderError(f"Local LLM request failed: {exc}", provider="local", error_type="connection_error") from exc

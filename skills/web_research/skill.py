@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -47,6 +48,42 @@ _DEEP_HINT_TOKENS = (
     "find",
     "check",
 )
+
+_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+")
+_QUERY_STOP_TOKENS = {
+    "кто",
+    "что",
+    "где",
+    "когда",
+    "почему",
+    "зачем",
+    "как",
+    "какой",
+    "какая",
+    "какие",
+    "каких",
+    "сюжет",
+    "история",
+    "истории",
+    "расскажи",
+    "объясни",
+    "про",
+    "это",
+    "the",
+    "what",
+    "who",
+    "where",
+    "when",
+    "why",
+    "how",
+    "about",
+    "story",
+    "query",
+    "initial",
+    "refined",
+    "test",
+    "тест",
+}
 
 
 def _domain(url: str) -> str:
@@ -468,7 +505,62 @@ def _progress_event(message: str, *, current: int, total: int, reason_code: str,
     return {"type": "task_progress", "message": message, "progress": payload["progress"], **payload}
 
 
+def _normalize_token(token: str) -> str:
+    return token.strip().lower().replace("ё", "е")
+
+
+def _tokenize(text: str) -> list[str]:
+    return [_normalize_token(token) for token in _TOKEN_RE.findall(text or "")]
+
+
+def _query_focus_tokens(query: str) -> list[str]:
+    focus: list[str] = []
+    seen: set[str] = set()
+    for token in _tokenize(query):
+        if len(token) < 4 or token in _QUERY_STOP_TOKENS:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        focus.append(token)
+        if len(focus) >= 10:
+            break
+    return focus
+
+
+def _token_hits_in_text(tokens: list[str], text: str) -> int:
+    if not tokens or not text:
+        return 0
+    haystack = _normalize_token(text)
+    return sum(1 for token in tokens if token in haystack)
+
+
+def _evidence_coverage_stats(query: str, evidence_pack: list[dict[str, Any]]) -> tuple[int, int, int]:
+    focus_tokens = _query_focus_tokens(query)
+    if not focus_tokens or not evidence_pack:
+        return 0, 0, 0
+
+    pages_with_hits = 0
+    total_hits = 0
+    for item in evidence_pack:
+        text = " ".join(
+            [
+                str(item.get("title") or "").strip(),
+                str(item.get("snippet") or "").strip(),
+                str(item.get("text_excerpt") or "").strip(),
+            ]
+        ).strip()
+        hits = _token_hits_in_text(focus_tokens, text)
+        total_hits += hits
+        if hits > 0:
+            pages_with_hits += 1
+    return len(focus_tokens), pages_with_hits, total_hits
+
+
 def _query_tokens(query: str) -> list[str]:
+    focus = _query_focus_tokens(query)
+    if focus:
+        return focus[:12]
     tokens = [token.strip() for token in query.lower().replace("ё", "е").split() if token.strip()]
     return [token for token in tokens if len(token) >= 4][:12]
 
@@ -707,6 +799,31 @@ def _run_deep_mode(
                 )
                 continue
 
+            focus_tokens = _query_focus_tokens(current_query)
+            if focus_tokens:
+                focus_hits = _token_hits_in_text(
+                    focus_tokens,
+                    " ".join(
+                        [
+                            str(candidate.get("title") or ""),
+                            str(candidate.get("snippet") or ""),
+                            extracted_text,
+                        ]
+                    ),
+                )
+                if focus_hits < 1:
+                    assumptions.append(f"{candidate['url']}: source_off_topic")
+                    progress_events.append(
+                        _progress_event(
+                            "Источник не покрывает тему запроса",
+                            current=round_index,
+                            total=max_rounds,
+                            reason_code="source_off_topic",
+                            extra={"url": candidate["url"]},
+                        )
+                    )
+                    continue
+
             evidence_map[candidate["url"]] = {
                 "url": candidate["url"],
                 "title": candidate.get("title"),
@@ -800,13 +917,60 @@ def _run_deep_mode(
                     extra={"error": f"invalid_decision:{invalid_decision}"},
                 )
             )
+
+        raw_score = judge.get("score")
+        if not isinstance(raw_score, (int, float)) or not (0.0 <= float(raw_score) <= 1.0):
+            invalid_score = str(raw_score)
+            judge_fallback_used = True
+            assumptions.append(f"judge_fallback:invalid_score:{invalid_score}")
+            judge = _heuristic_judge(current_query, pack)
+            decision = str(judge.get("decision") or "").upper()
+            progress_events.append(
+                _progress_event(
+                    "LLM judge вернул некорректный score, использую эвристику",
+                    current=round_index,
+                    total=max_rounds,
+                    reason_code="judge_fallback",
+                    extra={"error": f"invalid_score:{invalid_score}"},
+                )
+            )
+
+        focus_count, pages_with_hits, total_hits = _evidence_coverage_stats(current_query, pack)
+        required_hits = 0 if focus_count == 0 else (1 if focus_count <= 2 else 2)
+        if decision == "ENOUGH" and required_hits > 0 and (pages_with_hits < 1 or total_hits < required_hits):
+            decision = "NOT_ENOUGH"
+            judge["decision"] = "NOT_ENOUGH"
+            judge["next_query"] = current_query
+            assumptions.append(
+                f"judge_override:topic_coverage_insufficient:focus={focus_count},pages={pages_with_hits},hits={total_hits}"
+            )
+            progress_events.append(
+                _progress_event(
+                    "Покрытие по теме недостаточно, продолжаю поиск",
+                    current=round_index,
+                    total=max_rounds,
+                    reason_code="judge_override_topic_coverage",
+                    extra={
+                        "focus_tokens": focus_count,
+                        "pages_with_hits": pages_with_hits,
+                        "hits": total_hits,
+                    },
+                )
+            )
+
         progress_events.append(
             _progress_event(
                 f"Оценка покрытия: {decision}",
                 current=round_index,
                 total=max_rounds,
                 reason_code="judge_decision",
-                extra={"decision": decision, "score": judge.get("score")},
+                extra={
+                    "decision": decision,
+                    "score": judge.get("score"),
+                    "focus_tokens": focus_count,
+                    "pages_with_hits": pages_with_hits,
+                    "hits": total_hits,
+                },
             )
         )
         if decision == "ENOUGH":

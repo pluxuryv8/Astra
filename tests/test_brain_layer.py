@@ -71,6 +71,66 @@ def test_queue_serializes_requests(monkeypatch):
     assert second_started.is_set()
 
 
+def test_chat_priority_can_use_extra_slot(monkeypatch):
+    monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
+
+    cfg = BrainConfig.from_env()
+    cfg.max_concurrency = 1
+    cfg.chat_priority_extra_slots = 1
+    router = BrainRouter(cfg)
+
+    background_started = threading.Event()
+    background_release = threading.Event()
+    chat_started = threading.Event()
+
+    def slow_call(_messages, request, _model_id):
+        if request.purpose == "background_task":
+            background_started.set()
+            background_release.wait(0.6)
+            return ProviderResult(text="background", usage=None, raw={})
+        if request.purpose == "chat_response":
+            chat_started.set()
+            return ProviderResult(text="chat", usage=None, raw={})
+        return ProviderResult(text="ok", usage=None, raw={})
+
+    monkeypatch.setattr(router, "_call_local", slow_call)
+
+    def build_messages(_items):
+        return [{"role": "user", "content": "hi"}]
+
+    background_request = LLMRequest(
+        purpose="background_task",
+        context_items=[ContextItem(content="sync", source_type="user_prompt", sensitivity="personal")],
+        render_messages=build_messages,
+        run_id="run-1",
+        task_id="task-1",
+        step_id="step-1",
+    )
+    chat_request = LLMRequest(
+        purpose="chat_response",
+        context_items=[ContextItem(content="2+2?", source_type="user_prompt", sensitivity="personal")],
+        render_messages=build_messages,
+        run_id="run-2",
+        task_id="task-2",
+        step_id="step-2",
+    )
+
+    bg_thread = threading.Thread(target=lambda: router.call(background_request, _dummy_ctx()))
+    chat_thread = threading.Thread(target=lambda: router.call(chat_request, _dummy_ctx()))
+
+    bg_thread.start()
+    background_started.wait(0.2)
+    chat_thread.start()
+    time.sleep(0.12)
+
+    # Chat starts without waiting for background to finish when extra slot is enabled.
+    assert chat_started.is_set()
+
+    background_release.set()
+    bg_thread.join(1)
+    chat_thread.join(1)
+
+
 def test_backoff_on_429(monkeypatch):
     monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
     monkeypatch.setenv("OPENAI_API_KEY", "test")
@@ -212,6 +272,47 @@ def test_local_tier_model_falls_back_to_base_when_missing(monkeypatch):
             calls.append(model or "")
             if model == "qwen2.5:3b-instruct":
                 raise ProviderError("missing model", provider="local", error_type="model_not_found")
+            return ProviderResult(text="ok", usage=None, raw={"messages": messages}, model_id=model)
+
+    monkeypatch.setattr("core.brain.router.LocalLLMProvider", StubLocalProvider)
+
+    request = LLMRequest(
+        purpose="chat_response",
+        task_kind="chat",
+        messages=[{"role": "user", "content": "2+2?"}],
+        context_items=[ContextItem(content="2+2?", source_type="user_prompt", sensitivity="personal")],
+        run_id="run-1",
+        task_id="task-1",
+        step_id="step-1",
+    )
+
+    response = router.call(request, _dummy_ctx())
+
+    assert response.text == "ok"
+    assert response.model_id == "qwen2.5:7b-instruct"
+    assert calls == ["qwen2.5:3b-instruct", "qwen2.5:7b-instruct"]
+
+
+def test_local_tier_model_falls_back_to_base_on_connection_error(monkeypatch):
+    monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
+
+    cfg = BrainConfig.from_env()
+    cfg.local_chat_model = "qwen2.5:7b-instruct"
+    cfg.local_chat_fast_model = "qwen2.5:3b-instruct"
+    cfg.local_chat_complex_model = "qwen2.5:14b-instruct"
+    cfg.chat_tier_timeout_s = 20
+    router = BrainRouter(cfg)
+
+    calls: list[str] = []
+
+    class StubLocalProvider:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def chat(self, messages, *, model=None, model_kind="chat", **_kwargs):
+            calls.append(model or "")
+            if model == "qwen2.5:3b-instruct":
+                raise ProviderError("timeout", provider="local", error_type="connection_error")
             return ProviderResult(text="ok", usage=None, raw={"messages": messages}, model_id=model)
 
     monkeypatch.setattr("core.brain.router.LocalLLMProvider", StubLocalProvider)

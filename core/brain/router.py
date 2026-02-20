@@ -45,6 +45,8 @@ class BrainConfig:
     cloud_enabled: bool
     auto_cloud_enabled: bool
     max_concurrency: int
+    chat_priority_extra_slots: int
+    chat_tier_timeout_s: int
     max_retries: int
     backoff_base_ms: int
     budget_per_run: int | None
@@ -81,11 +83,11 @@ class BrainConfig:
 
         return cls(
             local_base_url=os.getenv("ASTRA_LLM_LOCAL_BASE_URL", "http://127.0.0.1:11434"),
-            local_chat_model=os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "qwen2.5:7b-instruct"),
-            local_chat_fast_model=_env_str("ASTRA_LLM_LOCAL_CHAT_MODEL_FAST", "llama3:8b-instruct-q4_K_M"),
+            local_chat_model=os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "llama2-uncensored:7b"),
+            local_chat_fast_model=_env_str("ASTRA_LLM_LOCAL_CHAT_MODEL_FAST", "llama2-uncensored:7b"),
             local_chat_complex_model=_env_str(
                 "ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX",
-                os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "qwen2.5:7b-instruct"),
+                "wizardlm-uncensored:13b",
             ),
             local_code_model=os.getenv("ASTRA_LLM_LOCAL_CODE_MODEL", "deepseek-coder-v2:16b-lite-instruct-q8_0"),
             local_timeout_s=max(1, _env_int("ASTRA_LLM_LOCAL_TIMEOUT_S", 30) or 30),
@@ -100,6 +102,8 @@ class BrainConfig:
             cloud_enabled=cloud_enabled,
             auto_cloud_enabled=_env_bool("ASTRA_AUTO_CLOUD_ENABLED", False),
             max_concurrency=_env_int("ASTRA_LLM_MAX_CONCURRENCY", 1) or 1,
+            chat_priority_extra_slots=max(0, _env_int("ASTRA_LLM_CHAT_PRIORITY_EXTRA_SLOTS", 1) or 0),
+            chat_tier_timeout_s=max(5, _env_int("ASTRA_LLM_CHAT_TIER_TIMEOUT_S", 20) or 20),
             max_retries=_env_int("ASTRA_LLM_MAX_RETRIES", 3) or 0,
             backoff_base_ms=_env_int("ASTRA_LLM_BACKOFF_BASE_MS", 350) or 350,
             budget_per_run=_env_int("ASTRA_LLM_BUDGET_PER_RUN", None),
@@ -108,20 +112,45 @@ class BrainConfig:
 
 
 class BrainQueue:
-    def __init__(self, max_concurrency: int) -> None:
+    def __init__(self, max_concurrency: int, *, chat_priority_extra_slots: int = 0) -> None:
         self.max_concurrency = max(1, int(max_concurrency))
+        self.chat_priority_extra_slots = max(0, int(chat_priority_extra_slots))
         self._lock = threading.Lock()
         self._condition = threading.Condition(self._lock)
-        self._queue: deque[object] = deque()
+        self._chat_queue: deque[object] = deque()
+        self._default_queue: deque[object] = deque()
+        self._token_is_chat: dict[object, bool] = {}
         self._inflight = 0
 
-    def acquire(self):
+    def _can_acquire(self, token: object) -> bool:
+        is_chat = self._token_is_chat.get(token, False)
+        if is_chat:
+            if not self._chat_queue or self._chat_queue[0] is not token:
+                return False
+            max_for_chat = self.max_concurrency + self.chat_priority_extra_slots
+            return self._inflight < max_for_chat
+
+        if self._chat_queue:
+            return False
+        if not self._default_queue or self._default_queue[0] is not token:
+            return False
+        return self._inflight < self.max_concurrency
+
+    def acquire(self, *, prioritize_chat: bool = False):
         token = object()
         with self._condition:
-            self._queue.append(token)
-            while self._queue[0] is not token or self._inflight >= self.max_concurrency:
+            self._token_is_chat[token] = prioritize_chat
+            if prioritize_chat:
+                self._chat_queue.append(token)
+            else:
+                self._default_queue.append(token)
+            while not self._can_acquire(token):
                 self._condition.wait()
-            self._queue.popleft()
+            if prioritize_chat:
+                self._chat_queue.popleft()
+            else:
+                self._default_queue.popleft()
+            self._token_is_chat.pop(token, None)
             self._inflight += 1
         return token
 
@@ -134,7 +163,10 @@ class BrainQueue:
 class BrainRouter:
     def __init__(self, config: BrainConfig | None = None) -> None:
         self.config = config or BrainConfig.from_env()
-        self.queue = BrainQueue(self.config.max_concurrency)
+        self.queue = BrainQueue(
+            self.config.max_concurrency,
+            chat_priority_extra_slots=self.config.chat_priority_extra_slots,
+        )
         self._cache: dict[str, dict[str, LLMResponse]] = {}
         self._run_counts: dict[str, int] = {}
         self._step_counts: dict[tuple[str, str], int] = {}
@@ -331,7 +363,8 @@ class BrainRouter:
                     error_type="budget_exceeded",
                 )
 
-        token = self.queue.acquire()
+        prioritize_chat = request.purpose == "chat_response" and request.preferred_model_kind == "chat"
+        token = self.queue.acquire(prioritize_chat=prioritize_chat)
         start = time.time()
         try:
             self._emit(
@@ -421,6 +454,13 @@ class BrainRouter:
             default_num_ctx=self.config.local_ollama_num_ctx,
             default_num_predict=self.config.local_ollama_num_predict,
         )
+        timeout_override: int | None = None
+        if (
+            request.preferred_model_kind == "chat"
+            and request.purpose == "chat_response"
+            and model_id != self.config.local_chat_model
+        ):
+            timeout_override = max(5, min(self.config.local_timeout_s, self.config.chat_tier_timeout_s))
         try:
             return provider.chat(
                 messages,
@@ -435,14 +475,16 @@ class BrainRouter:
                 run_id=request.run_id,
                 step_id=request.step_id,
                 purpose=request.purpose,
+                timeout_s=timeout_override,
             )
         except ProviderError as exc:
-            # Tiered chat model can be absent locally; fall back to base chat model.
+            # Tiered chat model can be absent/unstable locally; fall back to base chat model.
             if (
                 request.preferred_model_kind == "chat"
                 and model_id != self.config.local_chat_model
-                and exc.error_type == "model_not_found"
+                and exc.error_type in {"model_not_found", "connection_error", "http_error", "invalid_json"}
             ):
+                fallback_timeout_s = max(5, min(self.config.local_timeout_s, max(self.config.chat_tier_timeout_s, 35)))
                 return provider.chat(
                     messages,
                     model=self.config.local_chat_model,
@@ -456,6 +498,7 @@ class BrainRouter:
                     run_id=request.run_id,
                     step_id=request.step_id,
                     purpose=request.purpose,
+                    timeout_s=fallback_timeout_s,
                 )
             raise
 

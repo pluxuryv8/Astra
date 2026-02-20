@@ -278,7 +278,7 @@ def _build_default_crew(task: str, history: list[dict[str, Any]]) -> Crew:
     base_url = os.getenv("ASTRA_LLM_LOCAL_BASE_URL", "http://127.0.0.1:11434")
     model = os.getenv(
         "ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX",
-        os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "qwen2.5:7b-instruct"),
+        os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "wizardlm-uncensored:13b"),
     )
     timeout_s = float(os.getenv("ASTRA_CREWAI_OLLAMA_TIMEOUT_S", "4"))
     use_ollama = _env_bool("ASTRA_CREWAI_USE_OLLAMA", False)

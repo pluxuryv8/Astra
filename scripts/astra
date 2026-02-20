@@ -28,13 +28,37 @@ OLLAMA_RESTART_ON_ENV_MISMATCH="${ASTRA_OLLAMA_RESTART_ON_ENV_MISMATCH:-true}"
 PIDS_DIR="$ROOT_DIR/.astra/pids"
 LOG_BASE="$ROOT_DIR/artifacts/dev_logs"
 LATEST_LOG_FILE="$ROOT_DIR/.astra/dev_logs/latest"
+READABLE_LOG_FILE=""
 
 mkdir -p "$PIDS_DIR"
 mkdir -p "$(dirname "$LATEST_LOG_FILE")"
 
-ok() { echo "OK  $*"; }
-warn() { echo "WARN $*"; }
-fail() { echo "FAIL $*"; }
+log_timestamp() {
+  date +"%Y-%m-%d %H:%M:%S"
+}
+
+readable_log() {
+  local level="$1"
+  shift || true
+  local message="$*"
+  if [ -z "${READABLE_LOG_FILE:-}" ]; then
+    return 0
+  fi
+  printf "%s [%s] %s\n" "$(log_timestamp)" "$level" "$message" >> "$READABLE_LOG_FILE"
+}
+
+init_readable_log() {
+  local log_dir="$1"
+  READABLE_LOG_FILE="$log_dir/astra-readable.log"
+  : > "$READABLE_LOG_FILE"
+  readable_log "INFO" "Команда: scripts/astra ${CMD}"
+  readable_log "INFO" "Корень проекта: $ROOT_DIR"
+  readable_log "INFO" "Каталог логов запуска: $log_dir"
+}
+
+ok() { echo "OK  $*"; readable_log "OK" "$*"; }
+warn() { echo "WARN $*"; readable_log "WARN" "$*"; }
+fail() { echo "FAIL $*"; readable_log "FAIL" "$*"; }
 
 port_listening() {
   local port="$1"
@@ -137,14 +161,18 @@ start_stack() {
   local log_dir="$LOG_BASE/$ts"
   mkdir -p "$log_dir"
   echo "$log_dir" > "$LATEST_LOG_FILE"
+  init_readable_log "$log_dir"
+  readable_log "STEP" "Подготовка к запуску стека"
 
   if port_listening "$BRIDGE_PORT" && ! port_listening "$VITE_PORT"; then
     warn "Найден stale bridge без Vite. Очищаю порт ${BRIDGE_PORT} перед запуском."
     kill_port_listeners "$BRIDGE_PORT" "Bridge"
   fi
 
+  readable_log "STEP" "Пробую поднять Ollama (если доступна)"
   start_ollama "$log_dir" || true
 
+  readable_log "STEP" "Запускаю API + Desktop через scripts/run.sh --background"
   ASTRA_AUTH_MODE="${ASTRA_AUTH_MODE:-local}" ASTRA_LOG_DIR="$log_dir" ./scripts/run.sh --background
 
   if [ -f .astra/api.pid ]; then
@@ -159,6 +187,7 @@ start_stack() {
   wait_port "$BRIDGE_PORT" "Bridge"
 
   ok "Готово. Логи: $log_dir"
+  ok "Понятный лог запуска: $READABLE_LOG_FILE"
 }
 
 status_ports() {
@@ -191,7 +220,12 @@ do_status() {
   status_ports
   status_pids
   if [ -f "$LATEST_LOG_FILE" ]; then
-    echo "LOGS: $(cat "$LATEST_LOG_FILE")"
+    local log_dir
+    log_dir="$(cat "$LATEST_LOG_FILE")"
+    echo "LOGS: $log_dir"
+    if [ -f "$log_dir/astra-readable.log" ]; then
+      echo "HUMAN_LOG: $log_dir/astra-readable.log"
+    fi
   fi
   echo "Для диагностики: ./scripts/astra doctor"
 }
@@ -250,6 +284,9 @@ do_logs() {
       ;;
     ollama)
       file="$log_dir/ollama.log"
+      ;;
+    readable|human|summary)
+      file="$log_dir/astra-readable.log"
       ;;
   esac
   if [ -z "$file" ]; then

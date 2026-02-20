@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from copy import deepcopy
 from pathlib import Path
@@ -1282,13 +1283,94 @@ def _praison_prompt_block(reflection: dict[str, Any]) -> str:
         return "Praison reflection: unavailable."
     if not reflection.get("updated"):
         return "Praison reflection: not updated."
+    summary = str(reflection.get("summary") or "no summary").strip()
+    if len(summary) > 320:
+        summary = summary[:319].rstrip() + "…"
     lines = [
         f"focus={reflection.get('focus') or 'answer_quality'}",
         f"boost={reflection.get('mode_boost') or 'low'}",
         f"confidence={reflection.get('confidence') or 0.0}",
-        str(reflection.get("summary") or "no summary"),
+        summary,
     ]
     return "\n".join(f"- {line}" for line in lines)
+
+
+def _compact_text_for_prompt(value: Any, *, limit: int = 320) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if len(text) <= limit:
+        return text
+    return text[: max(1, limit - 1)].rstrip() + "…"
+
+
+def _runtime_analysis_prompt_block(analysis: dict[str, Any]) -> str:
+    recall = analysis.get("recall") if isinstance(analysis.get("recall"), dict) else {}
+    compact = {
+        "type": analysis.get("type"),
+        "intensity": analysis.get("intensity"),
+        "mirror_level": analysis.get("mirror_level"),
+        "path": analysis.get("path"),
+        "response_shape": analysis.get("response_shape"),
+        "primary_mode": analysis.get("primary_mode"),
+        "supporting_mode": analysis.get("supporting_mode"),
+        "flags": {
+            "task_complex": bool(analysis.get("task_complex")),
+            "workflow": bool(analysis.get("workflow")),
+            "conversation": bool(analysis.get("conversation")),
+            "autonomy": bool(analysis.get("autonomy")),
+            "dev_task": bool(analysis.get("dev_task")),
+            "self_improve": bool(analysis.get("self_improve")),
+        },
+        "recall": {
+            "trend": recall.get("trend"),
+            "detected_shift": bool(recall.get("detected_shift")),
+            "fast_path_reason": recall.get("fast_path_reason"),
+            "letta_hits": int(recall.get("letta_hits") or 0),
+            "phidata_hits": int(recall.get("phidata_hits") or 0),
+            "praison_confidence": float(recall.get("praison_confidence") or 0.0),
+        },
+        "self_reflection": _compact_text_for_prompt(analysis.get("self_reflection"), limit=420),
+    }
+    return json.dumps(compact, ensure_ascii=False, indent=2)
+
+
+def _prompt_block_limit(env_name: str, default: int) -> int:
+    raw = os.getenv(env_name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(300, min(12000, value))
+
+
+def _compact_multiline_for_prompt(value: Any, *, limit: int) -> str:
+    text = str(value or "").strip()
+    if len(text) <= limit:
+        return text
+    lines: list[str] = []
+    consumed = 0
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        chunk = len(line) + 1
+        if consumed + chunk > max(1, limit - 2):
+            break
+        lines.append(line)
+        consumed += chunk
+    if not lines:
+        return text[: max(1, limit - 1)].rstrip() + "…"
+    return "\n".join(lines).rstrip() + "\n…"
+
+
+def _chat_prompt_max_chars() -> int | None:
+    raw = os.getenv("ASTRA_CHAT_SYSTEM_PROMPT_MAX_CHARS")
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return max(2000, min(20000, value))
 
 
 def _superagi_prompt_block(autonomy_result: dict[str, Any]) -> str:
@@ -1395,6 +1477,18 @@ def build_dynamic_prompt(
     )
     health_report = system_health_check()
     analysis["system_health"] = health_report
+    core_identity_block = _compact_multiline_for_prompt(
+        persona["core_identity"],
+        limit=_prompt_block_limit("ASTRA_CHAT_PROMPT_CORE_IDENTITY_MAX_CHARS", 1100),
+    )
+    tone_pipeline_block = _compact_multiline_for_prompt(
+        persona["tone_pipeline"],
+        limit=_prompt_block_limit("ASTRA_CHAT_PROMPT_TONE_PIPELINE_MAX_CHARS", 900),
+    )
+    variation_rules_block = _compact_multiline_for_prompt(
+        persona["variation_rules"],
+        limit=_prompt_block_limit("ASTRA_CHAT_PROMPT_VARIATION_RULES_MAX_CHARS", 900),
+    )
     if str(analysis.get("path") or "full") == "fast":
         analysis["parallel_think"] = {"mode": "single", "task_complex": False, "items": [], "summary": "Fast path skip."}
         analysis["workflow_graph"] = {
@@ -1450,7 +1544,7 @@ def build_dynamic_prompt(
             runtime_lines.append(f"Стиль из long-term профиля: {' '.join(style_hints[:3])}")
         fast_prompt = "\n\n".join(
             [
-                "[Core Identity]\n" + persona["core_identity"],
+                "[Core Identity]\n" + core_identity_block,
                 "[Fast Path Runtime]\n- " + "\n- ".join(runtime_lines),
                 "[Profile Recall]\n" + profile_lines,
                 "[Fast Path Directives]\n"
@@ -1560,7 +1654,7 @@ def build_dynamic_prompt(
     )
     analysis["letta_update"] = letta_update
     runtime_directives = _tone_runtime_directives(analysis)
-    runtime_analysis_json = json.dumps(analysis, ensure_ascii=False, indent=2)
+    runtime_analysis_json = _runtime_analysis_prompt_block(analysis)
 
     mode_recall = retrieve_modes(history, memories=memories)
     mode_lines = [
@@ -1586,18 +1680,18 @@ def build_dynamic_prompt(
         runtime_lines.append(f"Agentic improve: {agentic_result.get('summary') or 'generated'}")
     letta_recall = analysis.get("letta_recall") if isinstance(analysis.get("letta_recall"), dict) else {}
     if letta_recall.get("summary"):
-        runtime_lines.append(f"Episodic recall: {letta_recall.get('summary')}")
+        runtime_lines.append(f"Episodic recall: {_compact_text_for_prompt(letta_recall.get('summary'), limit=360)}")
     phidata_context = analysis.get("phidata_context") if isinstance(analysis.get("phidata_context"), dict) else {}
     if phidata_context.get("summary"):
-        runtime_lines.append(f"Phidata context: {phidata_context.get('summary')}")
+        runtime_lines.append(f"Phidata context: {_compact_text_for_prompt(phidata_context.get('summary'), limit=320)}")
     praison_reflect = analysis.get("praison_reflect") if isinstance(analysis.get("praison_reflect"), dict) else {}
     if praison_reflect.get("summary"):
-        runtime_lines.append(f"Praison reflection: {praison_reflect.get('summary')}")
+        runtime_lines.append(f"Praison reflection: {_compact_text_for_prompt(praison_reflect.get('summary'), limit=320)}")
     runtime_lines.append(health_report.get("summary") or "Agents: status unavailable.")
     if user_name:
         runtime_lines.append(f"Имя пользователя: {user_name}.")
     if response_style_hint:
-        runtime_lines.append(f"Явная стилевая подсказка: {response_style_hint}")
+        runtime_lines.append(f"Явная стилевая подсказка: {_compact_text_for_prompt(response_style_hint, limit=260)}")
     if style_hints:
         runtime_lines.append(f"Стиль из long-term профиля: {' '.join(style_hints[:4])}")
 
@@ -1608,9 +1702,9 @@ def build_dynamic_prompt(
 
     base_prompt = "\n\n".join(
         [
-            "[Core Identity]\n" + persona["core_identity"],
-            "[Tone Pipeline]\n" + persona["tone_pipeline"],
-            "[Variation Rules]\n" + persona["variation_rules"],
+            "[Core Identity]\n" + core_identity_block,
+            "[Tone Pipeline]\n" + tone_pipeline_block,
+            "[Variation Rules]\n" + variation_rules_block,
             "[Runtime Analysis]\n" + runtime_analysis_json,
             "[Runtime Directives]\n- " + "\n- ".join(runtime_directives),
             "[Parallel Thinking]\n" + _parallel_think_prompt_block(parallel_result),
@@ -1620,13 +1714,16 @@ def build_dynamic_prompt(
             "[MetaGPT Dev]\n" + _metagpt_prompt_block(metagpt_result),
             "[Agentic Improve]\n" + _agentic_prompt_block(agentic_result),
             "[Mode Recall]\n- " + "\n- ".join(mode_lines),
-            "[Letta Recall]\n" + str(letta_recall.get("summary") or "No episodic recalls."),
-            "[Phidata RAG]\n" + str(phidata_context.get("summary") or "No RAG context."),
+            "[Letta Recall]\n" + _compact_text_for_prompt(letta_recall.get("summary") or "No episodic recalls.", limit=520),
+            "[Phidata RAG]\n" + _compact_text_for_prompt(phidata_context.get("summary") or "No RAG context.", limit=420),
             "[Praison Reflection]\n" + _praison_prompt_block(praison_reflect),
             "[System Health]\n" + str(health_report.get("summary") or "Agents: status unavailable."),
             "[Profile Recall]\n- " + "\n- ".join(runtime_lines) + "\n" + profile_lines,
         ]
     )
+    max_prompt_chars = _chat_prompt_max_chars()
+    if max_prompt_chars and len(base_prompt) > max_prompt_chars:
+        base_prompt = base_prompt[: max_prompt_chars - 1].rstrip() + "…"
     elapsed_s = round(perf_counter() - started_at, 4)
     analysis["prompt_build_latency_s"] = elapsed_s
     _LOG.info("latency: %.4f sec", elapsed_s)

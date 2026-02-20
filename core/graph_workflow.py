@@ -295,7 +295,7 @@ def _build_adapter() -> OllamaAdapter:
     enabled = os.getenv("ASTRA_LANGGRAPH_USE_OLLAMA", "0").strip().lower() in {"1", "true", "yes", "on"}
     model = os.getenv(
         "ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX",
-        os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "qwen2.5:7b-instruct"),
+        os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "wizardlm-uncensored:13b"),
     )
     timeout_raw = os.getenv("ASTRA_LANGGRAPH_OLLAMA_TIMEOUT_S", "5")
     try:

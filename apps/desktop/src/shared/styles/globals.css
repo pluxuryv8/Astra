@@ -1448,6 +1448,102 @@ body.is-resizing {
   line-height: 1.4;
 }
 
+.activity-thinking {
+  display: grid;
+  gap: 8px;
+}
+
+.activity-thinking-header {
+  font-size: 11px;
+  color: var(--text-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.activity-thinking-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.activity-thought {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 9px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.015), rgba(255, 255, 255, 0.005));
+}
+
+.activity-thought.is-live {
+  box-shadow: 0 0 0 1px rgba(126, 160, 255, 0.18), 0 6px 20px rgba(0, 0, 0, 0.22);
+  animation: activityThoughtPulse 1.8s ease-in-out infinite;
+}
+
+.activity-thought-icon {
+  margin-top: 1px;
+  color: var(--text-muted);
+}
+
+.activity-thought-icon.tone-active {
+  color: #9db7ff;
+}
+
+.activity-thought-icon.tone-success {
+  color: #7ad8b7;
+}
+
+.activity-thought-icon.tone-warn {
+  color: #e8c27b;
+}
+
+.activity-thought-icon.tone-error {
+  color: #ff8f99;
+}
+
+.activity-thought-body {
+  min-width: 0;
+}
+
+.activity-thought-title {
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.activity-thought-detail {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  word-break: break-word;
+}
+
+.activity-thought-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-subtle);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+@keyframes activityThoughtPulse {
+  0% {
+    box-shadow: 0 0 0 1px rgba(126, 160, 255, 0.1), 0 2px 12px rgba(0, 0, 0, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(126, 160, 255, 0.24), 0 8px 24px rgba(0, 0, 0, 0.26);
+  }
+  100% {
+    box-shadow: 0 0 0 1px rgba(126, 160, 255, 0.1), 0 2px 12px rgba(0, 0, 0, 0.18);
+  }
+}
+
 .activity-open {
   position: absolute;
   right: 16px;

@@ -329,3 +329,78 @@ def test_deep_mode_invalid_judge_decision_uses_fallback(monkeypatch, tmp_path: P
     assert result.artifacts
     assert any("judge_fallback:invalid_decision:empty" in item for item in result.assumptions)
     assert any(evt.get("reason_code") == "judge_fallback" for evt in result.events)
+
+
+def test_deep_mode_skips_off_topic_sources(monkeypatch, tmp_path: Path):
+    ctx = _ctx(tmp_path)
+    client = FakeSearchClient(
+        {
+            "сюжет хентая эйфория": [
+                {"url": "https://ru.wikipedia.org/wiki/Сюжет", "title": "Сюжет", "snippet": "определение термина"},
+            ]
+        }
+    )
+    monkeypatch.setattr(web_research, "build_search_client", lambda _settings: client)
+    monkeypatch.setattr(
+        web_research,
+        "_fetch_and_extract_cached",
+        lambda _ctx, *, run_id, candidate, timeout_s=15, max_bytes=2_000_000: {
+            "url": candidate["url"],
+            "title": candidate.get("title"),
+            "domain": candidate.get("domain"),
+            "snippet": candidate.get("snippet"),
+            "final_url": candidate["url"],
+            "extracted_text": "Сюжет — это система событий и их взаимосвязь в произведении.",
+            "error": None,
+        },
+    )
+
+    result = web_research.run({"query": "сюжет хентая эйфория", "mode": "deep", "max_rounds": 1}, ctx)
+
+    assert not result.sources
+    assert result.confidence == 0.0
+    assert any("source_off_topic" in item for item in result.assumptions)
+    assert any(evt.get("reason_code") == "source_off_topic" for evt in result.events)
+
+
+def test_deep_mode_invalid_judge_score_uses_fallback(monkeypatch, tmp_path: Path):
+    ctx = _ctx(tmp_path)
+    client = FakeSearchClient(
+        {
+            "initial query": [
+                {"url": "https://example.org/euphoria", "title": "Euphoria plot", "snippet": "plot summary"},
+            ]
+        }
+    )
+    monkeypatch.setattr(web_research, "build_search_client", lambda _settings: client)
+    monkeypatch.setattr(
+        web_research,
+        "_fetch_and_extract_cached",
+        lambda _ctx, *, run_id, candidate, timeout_s=15, max_bytes=2_000_000: {
+            "url": candidate["url"],
+            "title": candidate.get("title"),
+            "domain": candidate.get("domain"),
+            "snippet": candidate.get("snippet"),
+            "final_url": candidate["url"],
+            "extracted_text": "Euphoria anime plot summary and characters.",
+            "error": None,
+        },
+    )
+    monkeypatch.setattr(
+        web_research,
+        "_judge_research",
+        lambda *_args, **_kwargs: {
+            "decision": "ENOUGH",
+            "score": 5,
+            "why": "bad score",
+            "next_query": None,
+            "missing_topics": [],
+            "need_sources": 0,
+            "used_urls": ["https://example.org/euphoria"],
+        },
+    )
+
+    result = web_research.run({"query": "initial query", "mode": "deep", "max_rounds": 1}, ctx)
+
+    assert any("judge_fallback:invalid_score:5" in item for item in result.assumptions)
+    assert any(evt.get("reason_code") == "judge_fallback" for evt in result.events)

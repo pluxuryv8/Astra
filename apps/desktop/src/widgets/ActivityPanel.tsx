@@ -1,11 +1,17 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
+  Brain,
+  Bot,
   CheckCircle2,
   Circle,
+  Clock3,
+  Globe,
+  Info,
   Loader2,
   Pause,
   PanelRightClose,
+  Search,
   Square,
   Layers
 } from "lucide-react";
@@ -17,6 +23,7 @@ import Button from "../shared/ui/Button";
 import IconButton from "../shared/ui/IconButton";
 import Tooltip from "../shared/ui/Tooltip";
 import { phaseLabel, stepLabel, useAppStore } from "../shared/store/appStore";
+import type { EventItem } from "../shared/types/api";
 import type { ActivityStepStatus } from "../shared/types/ui";
 
 export type ActivityPanelProps = {
@@ -40,6 +47,236 @@ const statusIcon: Record<ActivityStepStatus, ReactNode> = {
   error: <AlertTriangle size={16} />
 };
 
+type ThoughtTone = "neutral" | "active" | "success" | "warn" | "error";
+
+type ThoughtLine = {
+  id: string;
+  title: string;
+  detail?: string;
+  tone: ThoughtTone;
+  icon: ReactNode;
+  ts?: number;
+  live?: boolean;
+};
+
+function payloadString(payload: Record<string, unknown>, key: string): string | null {
+  const value = payload[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function payloadNumber(payload: Record<string, unknown>, key: string): number | null {
+  const value = payload[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function eventTimeLabel(ts?: number): string {
+  if (!ts) return "";
+  const normalized = ts < 1e12 ? ts * 1000 : ts;
+  return new Date(normalized).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function thoughtFromEvent(event: EventItem): ThoughtLine | null {
+  const payload = (event.payload || {}) as Record<string, unknown>;
+  const seq = event.seq ?? event.id;
+  const type = event.type;
+
+  if (type === "intent_decided") {
+    const intent = payloadString(payload, "intent") || "UNKNOWN";
+    const reasons = Array.isArray(payload.reasons)
+      ? (payload.reasons as unknown[]).filter((item): item is string => typeof item === "string").slice(0, 3).join(", ")
+      : "";
+    return {
+      id: `thought-${seq}`,
+      title: `Определяю интент: ${intent}`,
+      detail: reasons || undefined,
+      tone: "active",
+      icon: <Brain size={15} />,
+      ts: event.ts,
+      live: true
+    };
+  }
+
+  if (type === "llm_route_decided") {
+    const route = payloadString(payload, "route") || "LOCAL";
+    const model = payloadString(payload, "model_id") || "model";
+    const reason = payloadString(payload, "reason");
+    return {
+      id: `thought-${seq}`,
+      title: `Маршрут LLM: ${route}`,
+      detail: reason ? `${model} • ${reason}` : model,
+      tone: "neutral",
+      icon: <Bot size={15} />,
+      ts: event.ts
+    };
+  }
+
+  if (type === "llm_request_started") {
+    const model = payloadString(payload, "model_id") || "model";
+    return {
+      id: `thought-${seq}`,
+      title: "Запрос к модели",
+      detail: model,
+      tone: "active",
+      icon: <Loader2 size={15} className="spin" />,
+      ts: event.ts,
+      live: true
+    };
+  }
+
+  if (type === "llm_request_succeeded") {
+    const model = payloadString(payload, "model_id") || "model";
+    const latency = payloadNumber(payload, "latency_ms");
+    return {
+      id: `thought-${seq}`,
+      title: "Модель ответила",
+      detail: latency != null ? `${model} • ${latency} ms` : model,
+      tone: "success",
+      icon: <CheckCircle2 size={15} />,
+      ts: event.ts
+    };
+  }
+
+  if (type === "llm_request_failed" || type === "local_llm_http_error") {
+    const errorType = payloadString(payload, "error_type") || payloadString(payload, "status") || event.message;
+    return {
+      id: `thought-${seq}`,
+      title: "Ошибка запроса к модели",
+      detail: errorType || undefined,
+      tone: "error",
+      icon: <AlertTriangle size={15} />,
+      ts: event.ts
+    };
+  }
+
+  if (type === "task_progress") {
+    const phase = payloadString(payload, "phase");
+    if (phase === "chat_auto_web_research_started") {
+      return {
+        id: `thought-${seq}`,
+        title: "Проверяю данные в интернете",
+        detail: payloadString(payload, "query") || undefined,
+        tone: "active",
+        icon: <Globe size={15} />,
+        ts: event.ts,
+        live: true
+      };
+    }
+    if (phase === "chat_auto_web_research_done") {
+      const sources = payloadNumber(payload, "sources_count");
+      const latency = payloadNumber(payload, "latency_ms");
+      const detail = [
+        sources != null ? `источников: ${sources}` : null,
+        latency != null ? `${latency} ms` : null
+      ]
+        .filter(Boolean)
+        .join(" • ");
+      return {
+        id: `thought-${seq}`,
+        title: "Web research завершен",
+        detail: detail || undefined,
+        tone: "success",
+        icon: <CheckCircle2 size={15} />,
+        ts: event.ts
+      };
+    }
+    if (phase === "chat_auto_web_research_failed") {
+      return {
+        id: `thought-${seq}`,
+        title: "Web research не удался",
+        detail: payloadString(payload, "error") || undefined,
+        tone: "error",
+        icon: <AlertTriangle size={15} />,
+        ts: event.ts
+      };
+    }
+    if (phase === "chat_auto_web_research_off_topic") {
+      return {
+        id: `thought-${seq}`,
+        title: "Web research не по теме запроса",
+        detail: payloadString(payload, "query") || undefined,
+        tone: "warn",
+        icon: <AlertTriangle size={15} />,
+        ts: event.ts
+      };
+    }
+
+    const reasonCode = payloadString(payload, "reason_code");
+    const query = payloadString(payload, "query");
+    const detail = [reasonCode, query].filter(Boolean).join(" • ");
+    return {
+      id: `thought-${seq}`,
+      title: event.message || "Прогресс задачи",
+      detail: detail || undefined,
+      tone: "active",
+      icon: <Search size={15} />,
+      ts: event.ts,
+      live: true
+    };
+  }
+
+  if (type === "source_found" || type === "source_fetched") {
+    const url = payloadString(payload, "url");
+    const count = payloadNumber(payload, "count");
+    return {
+      id: `thought-${seq}`,
+      title: type === "source_found" ? "Найден источник" : "Источники сохранены",
+      detail: url || (count != null ? `количество: ${count}` : undefined),
+      tone: "neutral",
+      icon: <Globe size={15} />,
+      ts: event.ts
+    };
+  }
+
+  if (type === "chat_response_generated") {
+    const provider = payloadString(payload, "provider") || "local";
+    const sources = payloadNumber(payload, "sources_count");
+    const detail = provider === "web_research" && sources != null ? `источников: ${sources}` : provider;
+    return {
+      id: `thought-${seq}`,
+      title: provider === "web_research" ? "Формирую ответ по источникам" : "Формирую финальный ответ",
+      detail,
+      tone: "success",
+      icon: <Bot size={15} />,
+      ts: event.ts
+    };
+  }
+
+  if (type === "approval_requested" || type === "step_paused_for_approval") {
+    return {
+      id: `thought-${seq}`,
+      title: "Нужно подтверждение действия",
+      detail: event.message || undefined,
+      tone: "warn",
+      icon: <Info size={15} />,
+      ts: event.ts
+    };
+  }
+
+  if (type === "run_done" || type === "task_done") {
+    return {
+      id: `thought-${seq}`,
+      title: "Этап завершен",
+      detail: event.message || undefined,
+      tone: "success",
+      icon: <CheckCircle2 size={15} />,
+      ts: event.ts
+    };
+  }
+
+  if (type === "run_failed" || type === "task_failed") {
+    return {
+      id: `thought-${seq}`,
+      title: "Выполнение завершилось с ошибкой",
+      detail: event.message || undefined,
+      tone: "error",
+      icon: <AlertTriangle size={15} />,
+      ts: event.ts
+    };
+  }
+
+  return null;
+}
+
 export default function ActivityPanel({ open, width, resizing, onToggle }: ActivityPanelProps) {
   const activity = useAppStore((state) => state.activity);
   const approvals = useAppStore((state) => state.approvals);
@@ -61,6 +298,12 @@ export default function ActivityPanel({ open, width, resizing, onToggle }: Activ
   const errorEvent = useMemo(() => {
     return [...events].reverse().find((event) => event.type === "local_llm_http_error");
   }, [events]);
+  const thoughtLines = useMemo(() => {
+    const runId = currentRun?.id || null;
+    const filtered = runId ? events.filter((event) => !event.run_id || event.run_id === runId) : events;
+    const lines = filtered.map((event) => thoughtFromEvent(event)).filter((item): item is ThoughtLine => Boolean(item));
+    return lines.slice(-18).reverse();
+  }, [currentRun?.id, events]);
   const artifactPath = useMemo(() => {
     const payload = errorEvent?.payload;
     if (payload && typeof payload === "object" && "artifact_path" in payload) {
@@ -193,6 +436,36 @@ export default function ActivityPanel({ open, width, resizing, onToggle }: Activ
                 ))}
               </div>
             ) : null}
+
+            <div className="activity-thinking">
+              <div className="activity-thinking-header">Мышление и действия</div>
+              {thoughtLines.length ? (
+                <div className="activity-thinking-list">
+                  {thoughtLines.map((line, index) => (
+                    <motion.div
+                      layout
+                      key={line.id}
+                      className={cn("activity-thought", `tone-${line.tone}`, { "is-live": line.live && index === 0 })}
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ duration: 0.18, delay: Math.min(index * 0.015, 0.14) }}
+                    >
+                      <span className={cn("activity-thought-icon", `tone-${line.tone}`)}>{line.icon}</span>
+                      <div className="activity-thought-body">
+                        <div className="activity-thought-title">{line.title}</div>
+                        {line.detail ? <div className="activity-thought-detail">{line.detail}</div> : null}
+                      </div>
+                      <span className="activity-thought-time">
+                        <Clock3 size={12} />
+                        {eventTimeLabel(line.ts)}
+                      </span>
+                    </motion.div>
+                  ))}
+                </div>
+              ) : (
+                <div className="activity-empty">События мышления появятся после первого запроса.</div>
+              )}
+            </div>
 
             {pendingApproval ? (
               <div className="activity-approval">

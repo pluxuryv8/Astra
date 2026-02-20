@@ -114,9 +114,9 @@ PY
   fi
 
   if [ -n "$OLLAMA_TAGS" ] && [ -n "$PYTHON_BIN" ]; then
-    REQ_CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:7b-instruct}"
-    REQ_CHAT_FAST_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_FAST:-qwen2.5:3b-instruct}"
-    REQ_CHAT_COMPLEX_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX:-$REQ_CHAT_MODEL}"
+    REQ_CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-llama2-uncensored:7b}"
+    REQ_CHAT_FAST_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_FAST:-llama2-uncensored:7b}"
+    REQ_CHAT_COMPLEX_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL_COMPLEX:-wizardlm-uncensored:13b}"
     REQ_CODE_MODEL="${ASTRA_LLM_LOCAL_CODE_MODEL:-deepseek-coder-v2:16b-lite-instruct-q8_0}"
     MISSING_MODELS=$($PYTHON_BIN - <<PY
 import json
@@ -142,7 +142,7 @@ PY
   fi
 
   if [ -n "$OLLAMA_TAGS" ] && [ -n "$PYTHON_BIN" ]; then
-    CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-qwen2.5:7b-instruct}"
+    CHAT_MODEL="${ASTRA_LLM_LOCAL_CHAT_MODEL:-llama2-uncensored:7b}"
     CHAT_MODEL_TEST="$CHAT_MODEL"
     if [[ "$CHAT_MODEL_TEST" != *:* ]]; then
       CHAT_MODEL_TEST="${CHAT_MODEL_TEST}:latest"

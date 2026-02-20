@@ -4,7 +4,10 @@ import json
 import os
 import re
 import threading
+import time
+import uuid
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,19 +32,73 @@ from core.event_bus import emit
 from core.intent_router import INTENT_ACT, INTENT_ASK, INTENT_CHAT, IntentDecision, IntentRouter
 from core.llm_routing import ContextItem
 from core.memory.interpreter import MemoryInterpretationError, interpret_user_message_for_memory
+from core.skill_context import SkillContext
 from core.semantic.decision import SemanticDecisionError
+from core.skills.result_types import ArtifactCandidate, SkillResult, SourceCandidate
+from memory.db import now_iso
 from memory import store
 from skills.memory_save import skill as memory_save_skill
+from skills.web_research import skill as web_research_skill
 
 router = APIRouter(prefix="/api/v1", tags=["runs"], dependencies=[Depends(require_auth)])
 
 CHAT_HISTORY_TURNS = 20
+_APP_BASE_DIR = Path(__file__).resolve().parents[3]
 _SOFT_RETRY_PROMPT = "Продолжи ответ точно по запросу владельца, полностью и без добавлений."
+_SOFT_RETRY_PROMPT_LANG_RU = (
+    "Перепиши ответ полностью на русском языке, строго по запросу владельца, без добавлений и без английских вставок."
+)
+_SOFT_RETRY_PROMPT_OFF_TOPIC = (
+    "Ответ не по теме. Ответь строго на вопрос владельца, по существу, без смены темы и без лишних отступлений."
+)
 _SOFT_RETRY_UNWANTED_PREFIXES = (
     "как ии", "как ai", "как языков", "извините",
     "я не могу", "я не должен", "против правил", "это нарушает",
     "согласно политике", "ограничения безопасности"
 )
+_CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+_RELEVANCE_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+")
+_FIRST_PERSON_RU_RE = re.compile(r"\b(я|мне|меня|мой|моя|моё|мои|мною)\b", flags=re.IGNORECASE)
+_FIRST_PERSON_NARRATIVE_RU_RE = re.compile(
+    r"\b(был|была|было|попал|попала|пришел|пришла|думал|думала|вспомнил|вспомнила|расскажу)\b",
+    flags=re.IGNORECASE,
+)
+_RELEVANCE_STOPWORDS = {
+    "как", "что", "это", "где", "когда", "почему", "зачем", "или", "и", "а", "но", "же",
+    "ли", "по", "на", "в", "с", "к", "из", "о", "об", "для", "про", "у", "от", "до",
+    "the", "and", "or", "for", "with", "from", "into", "about", "this", "that", "what", "how",
+}
+_TOPIC_ANCHOR_EXCLUDE = {
+    "пытали", "пытать", "пытался", "пыталась",
+    "сюжет", "история", "знаешь", "знаете",
+    "объясни", "объяснить", "расскажи", "рассказать",
+    "сделай", "сделать", "можно", "нужно", "помоги", "помочь",
+    "why", "how", "what", "explain", "tell", "help",
+}
+_AUTO_WEB_RESEARCH_INFO_QUERY_RE = re.compile(
+    r"\b("
+    r"кто|что|где|когда|почему|зачем|как|сколько|какой|какая|какие|чей|чья|чьи|"
+    r"знаешь|знаете|расскажи|объясни|объяснить|сюжет|история|факт|факты|"
+    r"who|what|where|when|why|how|explain|tell|fact|facts"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+_AUTO_WEB_RESEARCH_UNCERTAIN_RE = re.compile(
+    r"\b("
+    r"не знаю|не уверен|не слышал|не слышала|не помню|не могу подтвердить|"
+    r"возможно|наверное|предполагаю|скорее всего|может быть|"
+    r"not sure|i don't know|i am not sure|maybe|probably|i guess|i think"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+_AUTO_WEB_RESEARCH_ERROR_CODES = {
+    "chat_empty_response",
+    "connection_error",
+    "http_error",
+    "invalid_json",
+    "model_not_found",
+    "chat_llm_unhandled_error",
+}
 _FAST_CHAT_ACTION_RE = re.compile(
     r"\b("
     r"напомни|через\s+\d+|открой|запусти|выполни|кликни|нажми|перейди|удали|очисти|"
@@ -87,17 +144,17 @@ def _env_int(name: str, default: int) -> int:
 
 
 def _chat_temperature_default() -> float:
-    value = _env_float("ASTRA_LLM_CHAT_TEMPERATURE", 0.7)
-    return max(0.2, min(1.2, value))
+    value = _env_float("ASTRA_LLM_CHAT_TEMPERATURE", 0.35)
+    return max(0.1, min(1.0, value))
 
 
 def _chat_top_p_default() -> float:
-    value = _env_float("ASTRA_LLM_CHAT_TOP_P", 0.95)
+    value = _env_float("ASTRA_LLM_CHAT_TOP_P", 0.9)
     return max(0.0, min(1.0, value))
 
 
 def _chat_repeat_penalty_default() -> float:
-    value = _env_float("ASTRA_LLM_CHAT_REPEAT_PENALTY", 1.1)
+    value = _env_float("ASTRA_LLM_CHAT_REPEAT_PENALTY", 1.15)
     return max(1.0, value)
 
 
@@ -117,6 +174,32 @@ def _fast_chat_path_enabled() -> bool:
 def _fast_chat_max_chars() -> int:
     value = _env_int("ASTRA_CHAT_FAST_PATH_MAX_CHARS", 220)
     return max(60, min(600, value))
+
+
+def _chat_auto_web_research_enabled() -> bool:
+    return _env_bool("ASTRA_CHAT_AUTO_WEB_RESEARCH_ENABLED", True)
+
+
+def _chat_auto_web_research_max_rounds() -> int:
+    value = _env_int("ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_ROUNDS", 2)
+    return max(1, min(4, value))
+
+
+def _chat_auto_web_research_max_sources_total() -> int:
+    value = _env_int("ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_SOURCES", 6)
+    return max(1, min(16, value))
+
+
+def _chat_auto_web_research_max_pages_fetch() -> int:
+    value = _env_int("ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_PAGES", 4)
+    return max(1, min(12, value))
+
+
+def _chat_auto_web_research_depth() -> str:
+    value = (os.getenv("ASTRA_CHAT_AUTO_WEB_RESEARCH_DEPTH") or "brief").strip().lower()
+    if value in {"brief", "normal", "deep"}:
+        return value
+    return "brief"
 
 
 def _is_fast_chat_candidate(text: str, *, qa_mode: bool) -> bool:
@@ -257,7 +340,7 @@ def _chat_resilience_text(error_type: str | None) -> str:
         return "Облачная модель недоступна: не задан OPENAI_API_KEY."
     if error_type and "llm_call_failed" in error_type:
         return "Локальная модель сейчас недоступна. Проверь Ollama и выбранную модель, затем повтори запрос."
-    if error_type in {"model_not_found", "http_error", "connection_error", "invalid_json"}:
+    if error_type in {"model_not_found", "http_error", "connection_error", "invalid_json", "chat_empty_response"}:
         return "Локальная модель сейчас недоступна. Проверь Ollama и выбранную модель, затем повтори запрос."
     return "Не удалось получить ответ модели. Повтори запрос."
 
@@ -440,6 +523,14 @@ def _build_chat_system_prompt(
         owner_direct_mode=owner_direct_mode,
         tone_analysis=tone_analysis,
     )
+    if _CYRILLIC_RE.search(user_message or ""):
+        prompt = (
+            f"{prompt}\n\n"
+            "[Language Lock]\n"
+            "- Отвечай только на русском языке.\n"
+            "- Не переключайся на английский без явной просьбы владельца.\n"
+            "- Английские слова допустимы только для кода/терминов."
+        )
     return prompt
 
 
@@ -454,33 +545,542 @@ def _is_likely_truncated_response(text: str) -> bool:
     return False
 
 
+def _is_ru_language_mismatch(user_text: str, response_text: str) -> bool:
+    if not user_text.strip() or not response_text.strip():
+        return False
+    if not _CYRILLIC_RE.search(user_text):
+        return False
+    return not bool(_CYRILLIC_RE.search(response_text))
+
+
+def _relevance_tokens(text: str) -> list[str]:
+    return [token.lower() for token in _RELEVANCE_TOKEN_RE.findall(text or "")]
+
+
+def _query_focus_tokens(text: str, *, limit: int = 8) -> list[str]:
+    focus: list[str] = []
+    seen: set[str] = set()
+    for token in _relevance_tokens(text):
+        if len(token) < 3 or token in _RELEVANCE_STOPWORDS:
+            continue
+        if token in seen:
+            continue
+        seen.add(token)
+        focus.append(token)
+        if len(focus) >= limit:
+            break
+    return focus
+
+
+def _focus_overlap_count(focus_tokens: list[str], response_tokens: list[str]) -> int:
+    if not focus_tokens or not response_tokens:
+        return 0
+    response_set = set(response_tokens)
+    long_response_tokens = [token for token in response_set if len(token) >= 5]
+    overlap = 0
+    for focus in focus_tokens:
+        if focus in response_set:
+            overlap += 1
+            continue
+        if len(focus) < 5:
+            continue
+        stem = focus[:5]
+        if any(token.startswith(stem) for token in long_response_tokens):
+            overlap += 1
+    return overlap
+
+
+def _topic_anchor_tokens(focus_tokens: list[str]) -> list[str]:
+    return [token for token in focus_tokens if token not in _TOPIC_ANCHOR_EXCLUDE]
+
+
+def _is_likely_off_topic(user_text: str, response_text: str) -> bool:
+    if not user_text.strip() or not response_text.strip():
+        return False
+    focus = _query_focus_tokens(user_text)
+    if len(focus) < 2:
+        return False
+    response_tokens = _relevance_tokens(response_text)
+    overlap = _focus_overlap_count(focus, response_tokens)
+    query_words = [part for part in re.split(r"\s+", user_text.strip()) if part]
+    anchor_focus = _topic_anchor_tokens(focus)
+    if len(anchor_focus) >= 2:
+        anchor_overlap = _focus_overlap_count(anchor_focus, response_tokens)
+        if anchor_overlap == 0:
+            return True
+        if len(anchor_focus) >= 3 and len(query_words) <= 20 and anchor_overlap <= 1:
+            return True
+        critical_focus = [token for token in anchor_focus if len(token) >= 6]
+        if critical_focus and _focus_overlap_count(critical_focus, response_tokens) == 0:
+            return True
+        if len(critical_focus) >= 2:
+            critical_overlap = _focus_overlap_count(critical_focus, response_tokens)
+            if critical_overlap <= len(critical_focus) - 1 and len(query_words) <= 20:
+                return True
+    if overlap == 0:
+        return True
+    return len(focus) >= 4 and len(query_words) <= 16 and overlap <= 1
+
+
+def _is_unprompted_first_person_narrative(user_text: str, response_text: str) -> bool:
+    if not response_text.strip():
+        return False
+    if _FIRST_PERSON_RU_RE.search(user_text):
+        return False
+    first_person_hits = _FIRST_PERSON_RU_RE.findall(response_text)
+    if len(first_person_hits) < 1:
+        return False
+    return bool(_FIRST_PERSON_NARRATIVE_RU_RE.search(response_text))
+
+
 def _has_unwanted_prefix(text: str) -> bool:
     lowered = text.strip().lower()
     return any(lowered.startswith(prefix) for prefix in _SOFT_RETRY_UNWANTED_PREFIXES)
 
 
-def _needs_soft_retry(text: str) -> bool:
+def _soft_retry_reason(user_text: str, text: str) -> str | None:
     if _has_unwanted_prefix(text):
-        return True
-    return _is_likely_truncated_response(text)
+        return "unwanted_prefix"
+    if _is_ru_language_mismatch(user_text, text):
+        return "ru_language_mismatch"
+    if _is_unprompted_first_person_narrative(user_text, text):
+        return "off_topic"
+    if _is_likely_off_topic(user_text, text):
+        return "off_topic"
+    if _is_likely_truncated_response(text):
+        return "truncated"
+    return None
+
+
+def _soft_retry_prompt(reason: str) -> str:
+    if reason == "ru_language_mismatch":
+        return _SOFT_RETRY_PROMPT_LANG_RU
+    if reason == "off_topic":
+        return _SOFT_RETRY_PROMPT_OFF_TOPIC
+    return _SOFT_RETRY_PROMPT
+
+
+def _last_user_message(messages: list[dict[str, Any]] | None) -> str:
+    if not messages:
+        return ""
+    for item in reversed(messages):
+        if str(item.get("role", "")).strip().lower() != "user":
+            continue
+        content = item.get("content")
+        return content.strip() if isinstance(content, str) else ""
+    return ""
+
+
+def _call_chat_base_fallback(brain, request: LLMRequest, ctx) -> Any:
+    # Switch purpose so router picks base chat model instead of tiered fast/complex model.
+    fallback_request = replace(request, purpose="chat_response_base_fallback")
+    try:
+        fallback_response = brain.call(fallback_request, ctx)
+    except Exception:  # noqa: BLE001
+        return None
+    if fallback_response.status == "ok" and (fallback_response.text or "").strip():
+        return fallback_response
+    return None
+
+
+def _retry_off_topic_with_min_prompt(brain, request: LLMRequest, ctx, *, user_text: str) -> Any:
+    if not user_text.strip():
+        return None
+    focused_messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ответь строго по вопросу пользователя. Без смены темы, без мета-комментариев. "
+                "Если не знаешь точный ответ, честно скажи это и попроси уточнение."
+            ),
+        },
+        {"role": "user", "content": user_text.strip()},
+    ]
+    focused_request = replace(
+        request,
+        purpose="chat_response_base_fallback",
+        messages=focused_messages,
+    )
+    try:
+        focused_response = brain.call(focused_request, ctx)
+    except Exception:  # noqa: BLE001
+        return None
+    text = focused_response.text or ""
+    if focused_response.status == "ok" and text.strip() and _soft_retry_reason(user_text, text) != "off_topic":
+        return focused_response
+    return None
+
+
+def _off_topic_guard_text(user_text: str) -> str:
+    query = " ".join((user_text or "").split()).strip()
+    if not query:
+        return "Ответ ушёл от темы. Повтори вопрос одним предложением, отвечу строго по сути."
+    return (
+        f"Понял запрос: «{query}». Предыдущий ответ вышел не по теме. "
+        "Могу дать короткий или подробный ответ строго по этому вопросу."
+    )
+
+
+def _rewrite_response_in_russian(brain, request: LLMRequest, ctx, *, user_text: str, draft_text: str) -> Any:
+    rewrite_messages = [
+        {
+            "role": "system",
+            "content": (
+                "Ты редактор ответа ассистента. Перепиши ответ строго на русском языке, "
+                "без английских вставок и без добавления новых фактов. "
+                "Верни только итоговый ответ без заголовков, без префиксов и без служебных пометок."
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"[Запрос пользователя]\n{user_text.strip()}\n\n"
+                f"[Черновик ответа]\n{draft_text.strip()}\n\n"
+                "Сделай итоговый ответ полностью на русском языке и выведи только финальный текст."
+            ),
+        },
+    ]
+    rewrite_request = replace(
+        request,
+        purpose="chat_response_base_fallback",
+        messages=rewrite_messages,
+    )
+    try:
+        rewrite_response = brain.call(rewrite_request, ctx)
+    except Exception:  # noqa: BLE001
+        return None
+    text = rewrite_response.text or ""
+    if rewrite_response.status == "ok" and text.strip() and _CYRILLIC_RE.search(text):
+        return rewrite_response
+    return None
 
 
 def _call_chat_with_soft_retry(brain, request: LLMRequest, ctx) -> Any:
     response = brain.call(request, ctx)
-    if response.status != "ok" or not _needs_soft_retry(response.text):
+    if response.status != "ok":
         return response
+
+    if not (response.text or "").strip():
+        fallback = _call_chat_base_fallback(brain, request, ctx)
+        return fallback or response
+
+    user_text = _last_user_message(request.messages)
+    reason = _soft_retry_reason(user_text, response.text or "")
+    if not reason:
+        return response
+
+    if reason == "off_topic":
+        focused = _retry_off_topic_with_min_prompt(brain, request, ctx, user_text=user_text)
+        if focused is not None:
+            return focused
+
+    if reason == "ru_language_mismatch":
+        rewritten = _rewrite_response_in_russian(
+            brain,
+            request,
+            ctx,
+            user_text=user_text,
+            draft_text=response.text or "",
+        )
+        if rewritten is not None:
+            return rewritten
 
     retry_messages = list(request.messages or [])
     retry_messages.append({"role": "assistant", "content": response.text})
-    retry_messages.append({"role": "user", "content": _SOFT_RETRY_PROMPT})
+    retry_messages.append({"role": "user", "content": _soft_retry_prompt(reason)})
     retry_request = replace(request, messages=retry_messages)
     try:
         retry_response = brain.call(retry_request, ctx)
     except Exception:  # noqa: BLE001
-        return response
+        retry_response = response
+
     if retry_response.status == "ok" and (retry_response.text or "").strip():
+        if reason == "off_topic" and _soft_retry_reason(user_text, retry_response.text or "") == "off_topic":
+            fallback = _call_chat_base_fallback(brain, request, ctx)
+            if fallback is not None and _soft_retry_reason(user_text, fallback.text or "") != "off_topic":
+                return fallback
+            return replace(retry_response, text=_off_topic_guard_text(user_text))
         return retry_response
-    return response
+
+    fallback = _call_chat_base_fallback(brain, request, ctx)
+    if reason == "off_topic" and fallback is None:
+        return replace(response, text=_off_topic_guard_text(user_text))
+    return fallback or response
+
+
+def _is_information_query(user_text: str) -> bool:
+    query = (user_text or "").strip()
+    if not query:
+        return False
+    lowered = query.lower()
+    if _FAST_CHAT_ACTION_RE.search(lowered):
+        return False
+    if _FAST_CHAT_MEMORY_RE.search(lowered):
+        return False
+    if "?" in query:
+        return True
+    if _AUTO_WEB_RESEARCH_INFO_QUERY_RE.search(lowered):
+        return True
+    words = [part for part in re.split(r"\s+", query) if part]
+    return len(words) >= 7
+
+
+def _is_uncertain_response(text: str) -> bool:
+    value = (text or "").strip()
+    if not value:
+        return True
+    lowered = value.lower()
+    if "предыдущий ответ вышел не по теме" in lowered:
+        return True
+    return bool(_AUTO_WEB_RESEARCH_UNCERTAIN_RE.search(lowered))
+
+
+def _should_auto_web_research(user_text: str, response_text: str, *, error_type: str | None = None) -> bool:
+    if not _chat_auto_web_research_enabled():
+        return False
+    if not _is_information_query(user_text):
+        return False
+    if error_type in _AUTO_WEB_RESEARCH_ERROR_CODES:
+        return True
+    answer = (response_text or "").strip()
+    if not answer:
+        return True
+    if _soft_retry_reason(user_text, answer) in {"off_topic", "ru_language_mismatch"}:
+        return True
+    return _is_uncertain_response(answer)
+
+
+def _source_value(source: SourceCandidate | dict[str, Any], key: str) -> Any:
+    if isinstance(source, dict):
+        return source.get(key)
+    return getattr(source, key, None)
+
+
+def _artifact_value(artifact: ArtifactCandidate | dict[str, Any], key: str) -> Any:
+    if isinstance(artifact, dict):
+        return artifact.get(key)
+    return getattr(artifact, key, None)
+
+
+def _read_web_research_answer(result: SkillResult) -> str:
+    artifacts = list(result.artifacts or [])
+    artifacts.sort(key=lambda item: 0 if str(_artifact_value(item, "type") or "") == "web_research_answer_md" else 1)
+    for artifact in artifacts:
+        content_uri = str(_artifact_value(artifact, "content_uri") or "").strip()
+        if not content_uri:
+            continue
+        path = Path(content_uri)
+        if not path.is_absolute():
+            path = _APP_BASE_DIR / path
+        try:
+            text = path.read_text(encoding="utf-8").strip()
+        except Exception:  # noqa: BLE001
+            continue
+        if text:
+            return text
+    return ""
+
+
+def _format_web_research_sources(sources: list[SourceCandidate | dict[str, Any]], *, limit: int = 5) -> str:
+    lines: list[str] = []
+    seen_urls: set[str] = set()
+    for item in sources:
+        url = str(_source_value(item, "url") or "").strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        title = str(_source_value(item, "title") or "").strip()
+        label = title or url
+        lines.append(f"- {label} - {url}")
+        if len(lines) >= limit:
+            break
+    return "\n".join(lines)
+
+
+def _compose_web_research_chat_text(result: SkillResult) -> str:
+    answer = _read_web_research_answer(result)
+    if not answer:
+        summary = str(result.what_i_did or "").strip()
+        if summary:
+            answer = f"{summary}\n\nЯ проверил источники и собрал данные из интернета."
+    sources_block = _format_web_research_sources(list(result.sources or []))
+    if sources_block and "источники:" not in answer.lower():
+        answer = f"{answer.strip()}\n\nИсточники:\n{sources_block}".strip()
+    return answer.strip()
+
+
+def _persist_web_research_result(run_id: str, result: SkillResult) -> None:
+    try:
+        existing_source_urls = {
+            str(item.get("url") or "").strip()
+            for item in store.list_sources(run_id)
+            if str(item.get("url") or "").strip()
+        }
+        sources_payload: list[dict[str, Any]] = []
+        for source in result.sources or []:
+            url = str(_source_value(source, "url") or "").strip()
+            if not url or url in existing_source_urls:
+                continue
+            existing_source_urls.add(url)
+            sources_payload.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "url": url,
+                    "title": _source_value(source, "title"),
+                    "domain": _source_value(source, "domain"),
+                    "quality": _source_value(source, "quality"),
+                    "retrieved_at": _source_value(source, "retrieved_at") or now_iso(),
+                    "snippet": _source_value(source, "snippet"),
+                    "pinned": bool(_source_value(source, "pinned")),
+                }
+            )
+        if sources_payload:
+            store.insert_sources(run_id, sources_payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        existing_artifact_uris = {
+            str(item.get("content_uri") or "").strip()
+            for item in store.list_artifacts(run_id)
+            if str(item.get("content_uri") or "").strip()
+        }
+        artifacts_payload: list[dict[str, Any]] = []
+        for artifact in result.artifacts or []:
+            content_uri = str(_artifact_value(artifact, "content_uri") or "").strip()
+            if not content_uri or content_uri in existing_artifact_uris:
+                continue
+            existing_artifact_uris.add(content_uri)
+            artifacts_payload.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "type": str(_artifact_value(artifact, "type") or "artifact"),
+                    "title": str(_artifact_value(artifact, "title") or "Artifact"),
+                    "content_uri": content_uri,
+                    "created_at": _artifact_value(artifact, "created_at") or now_iso(),
+                    "meta": _artifact_value(artifact, "meta") if isinstance(_artifact_value(artifact, "meta"), dict) else {},
+                }
+            )
+        if artifacts_payload:
+            store.insert_artifacts(run_id, artifacts_payload)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _emit_web_research_progress(run_id: str, events: list[dict[str, Any]] | None) -> None:
+    for item in events or []:
+        if not isinstance(item, dict):
+            continue
+        message = str(item.get("message") or "").strip()
+        if not message:
+            continue
+        payload = {key: value for key, value in item.items() if key not in {"type", "message"}}
+        emit(
+            run_id,
+            "task_progress",
+            message,
+            payload if isinstance(payload, dict) else {},
+        )
+
+
+def _run_auto_web_research(
+    run: dict[str, Any],
+    settings: dict[str, Any] | None,
+    *,
+    query_text: str,
+    response_style_hint: str | None,
+) -> dict[str, Any] | None:
+    run_id = str(run.get("id") or "").strip()
+    if not run_id:
+        return None
+
+    step_id = f"chat-web-research-step:{run_id}"
+    task_id = f"chat-web-research-task:{run_id}"
+    step = {
+        "id": step_id,
+        "run_id": run_id,
+        "kind": "WEB_RESEARCH",
+        "skill_name": "web_research",
+        "title": "Chat auto web research",
+    }
+    task = {"id": task_id, "run_id": run_id}
+    ctx = SkillContext(
+        run=run,
+        plan_step=step,
+        task=task,
+        settings=settings if isinstance(settings, dict) else {},
+        base_dir=str(_APP_BASE_DIR),
+    )
+    inputs: dict[str, Any] = {
+        "query": query_text.strip(),
+        "mode": "deep",
+        "depth": _chat_auto_web_research_depth(),
+        "max_rounds": _chat_auto_web_research_max_rounds(),
+        "max_sources_total": _chat_auto_web_research_max_sources_total(),
+        "max_pages_fetch": _chat_auto_web_research_max_pages_fetch(),
+    }
+    if isinstance(response_style_hint, str) and response_style_hint.strip():
+        inputs["style_hint"] = response_style_hint.strip()
+
+    emit(
+        run_id,
+        "task_progress",
+        "Проверяю данные в интернете",
+        {"phase": "chat_auto_web_research_started", "query": query_text.strip()},
+    )
+    started_at = time.time()
+    try:
+        result = web_research_skill.run(inputs, ctx)
+    except Exception as exc:  # noqa: BLE001
+        emit(
+            run_id,
+            "task_progress",
+            "Auto web research не удался",
+            {"phase": "chat_auto_web_research_failed", "error": str(exc)},
+            level="warning",
+        )
+        return None
+    latency_ms = int((time.time() - started_at) * 1000)
+    _emit_web_research_progress(run_id, result.events)
+    text = _compose_web_research_chat_text(result)
+    if not text:
+        emit(
+            run_id,
+            "task_progress",
+            "Auto web research не дал итогового ответа",
+            {"phase": "chat_auto_web_research_empty"},
+            level="warning",
+        )
+        return None
+
+    if _soft_retry_reason(query_text, text) == "off_topic":
+        emit(
+            run_id,
+            "task_progress",
+            "Auto web research вернул нерелевантный ответ",
+            {"phase": "chat_auto_web_research_off_topic", "query": query_text.strip()},
+            level="warning",
+        )
+        return None
+
+    _persist_web_research_result(run_id, result)
+    emit(
+        run_id,
+        "task_progress",
+        "Auto web research завершён",
+        {
+            "phase": "chat_auto_web_research_done",
+            "sources_count": len(result.sources or []),
+            "latency_ms": latency_ms,
+            "confidence": result.confidence,
+        },
+    )
+    return {
+        "text": text,
+        "latency_ms": latency_ms,
+        "sources_count": len(result.sources or []),
+        "confidence": result.confidence,
+    }
 
 
 @router.post("/projects/{project_id}/runs")
@@ -762,14 +1362,43 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
                     },
                 )
         else:
-            if response.status != "ok":
-                fallback_error_type = response.error_type or "chat_llm_failed"
+            if response.status != "ok" or not (response.text or "").strip():
+                fallback_error_type = response.error_type or "chat_empty_response"
                 fallback_provider = response.provider or "local"
                 fallback_model_id = response.model_id
                 fallback_latency_ms = response.latency_ms
                 fallback_text = _chat_resilience_text(fallback_error_type)
 
         if fallback_text is not None:
+            if _should_auto_web_research(payload.query_text, fallback_text, error_type=fallback_error_type):
+                researched = _run_auto_web_research(
+                    run,
+                    settings,
+                    query_text=payload.query_text,
+                    response_style_hint=effective_response_style_hint,
+                )
+                if researched is not None:
+                    emit(
+                        run["id"],
+                        "chat_response_generated",
+                        "Ответ сформирован (web research)",
+                        {
+                            "provider": "web_research",
+                            "model_id": "web_research",
+                            "latency_ms": researched.get("latency_ms"),
+                            "text": researched.get("text"),
+                            "degraded": False,
+                            "sources_count": researched.get("sources_count"),
+                            "confidence": researched.get("confidence"),
+                        },
+                    )
+                    _save_memory_payload_async(run, memory_payload, settings)
+                    return {
+                        "kind": "chat",
+                        "intent": decision.to_dict(),
+                        "run": run,
+                        "chat_response": researched.get("text"),
+                    }
             emit(
                 run["id"],
                 "chat_response_generated",
@@ -786,6 +1415,36 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
             )
             _save_memory_payload_async(run, memory_payload, settings)
             return {"kind": "chat", "intent": decision.to_dict(), "run": run, "chat_response": fallback_text}
+
+        if _should_auto_web_research(payload.query_text, response.text or "", error_type=None):
+            researched = _run_auto_web_research(
+                run,
+                settings,
+                query_text=payload.query_text,
+                response_style_hint=effective_response_style_hint,
+            )
+            if researched is not None:
+                emit(
+                    run["id"],
+                    "chat_response_generated",
+                    "Ответ сформирован (web research)",
+                    {
+                        "provider": "web_research",
+                        "model_id": "web_research",
+                        "latency_ms": researched.get("latency_ms"),
+                        "text": researched.get("text"),
+                        "degraded": False,
+                        "sources_count": researched.get("sources_count"),
+                        "confidence": researched.get("confidence"),
+                    },
+                )
+                _save_memory_payload_async(run, memory_payload, settings)
+                return {
+                    "kind": "chat",
+                    "intent": decision.to_dict(),
+                    "run": run,
+                    "chat_response": researched.get("text"),
+                }
 
         emit(
             run["id"],

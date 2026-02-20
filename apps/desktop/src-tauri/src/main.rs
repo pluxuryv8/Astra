@@ -167,6 +167,14 @@ fn main() {
         .manage(OverlayState {
             mode: Mutex::new("auto".to_string()),
         })
+        .setup(|app| {
+            if let Some(main) = app.get_window("main") {
+                if let Err(err) = main.maximize() {
+                    eprintln!("Не удалось развернуть главное окно при старте: {err}");
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_settings_window,
             check_permissions,
