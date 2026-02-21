@@ -112,9 +112,6 @@ export ASTRA_LLM_CHAT_TIER_TIMEOUT_S=20
 | `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_ROUNDS` | max раундов auto web research | `2` | `apps/api/routes/runs.py` |
 | `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_SOURCES` | max источников для auto web research | `6` | `apps/api/routes/runs.py` |
 | `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_PAGES` | max страниц для fetch в auto web research | `4` | `apps/api/routes/runs.py` |
-| `ASTRA_CLOUD_ENABLED` | разрешить cloud-route | `false` | `core/brain/router.py:76` |
-| `ASTRA_AUTO_CLOUD_ENABLED` | автопереход в cloud | `false` | `core/brain/router.py:97` |
-| `OPENAI_API_KEY` | ключ cloud провайдера | отсутствует | `core/brain/router.py:75` |
 | `ASTRA_REMINDERS_ENABLED` | включить scheduler reminders | `true` | `core/reminders/scheduler.py:135` |
 | `ASTRA_TIMEZONE` | TZ для reminders | системная TZ, fallback UTC | `core/reminders/scheduler.py:63` |
 

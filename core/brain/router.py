@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import random
 import re
 import threading
 import time
@@ -11,19 +10,15 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from core.brain.providers import CloudLLMProvider, LocalLLMProvider, ProviderError
+from core.brain.providers import LocalLLMProvider, ProviderError
 from core.brain.types import LLMRequest, LLMResponse
 from core.event_bus import emit
 from core.llm_routing import (
-    ROUTE_CLOUD,
     ROUTE_LOCAL,
     ContextItem,
     PolicyFlags,
     decide_route,
-    request_cloud_approval,
-    sanitize_context_items,
 )
-from core.secrets import get_secret
 
 
 @dataclass
@@ -40,26 +35,14 @@ class BrainConfig:
     local_fast_query_max_words: int
     local_complex_query_min_chars: int
     local_complex_query_min_words: int
-    cloud_base_url: str
-    cloud_model: str
-    cloud_enabled: bool
-    auto_cloud_enabled: bool
     max_concurrency: int
     chat_priority_extra_slots: int
     chat_tier_timeout_s: int
-    max_retries: int
-    backoff_base_ms: int
     budget_per_run: int | None
     budget_per_step: int | None
 
     @classmethod
     def from_env(cls) -> "BrainConfig":
-        def _env_bool(name: str, default: bool) -> bool:
-            raw = os.getenv(name)
-            if raw is None:
-                return default
-            return raw.strip().lower() in {"1", "true", "yes", "on"}
-
         def _env_int(name: str, default: int | None) -> int | None:
             raw = os.getenv(name)
             if raw is None:
@@ -75,11 +58,6 @@ class BrainConfig:
                 return default
             value = raw.strip()
             return value or default
-
-        api_key = os.getenv("OPENAI_API_KEY") or get_secret("OPENAI_API_KEY")
-        cloud_enabled = _env_bool("ASTRA_CLOUD_ENABLED", False)
-        if not api_key:
-            cloud_enabled = False
 
         return cls(
             local_base_url=os.getenv("ASTRA_LLM_LOCAL_BASE_URL", "http://127.0.0.1:11434"),
@@ -97,15 +75,9 @@ class BrainConfig:
             local_fast_query_max_words=max(3, _env_int("ASTRA_LLM_FAST_QUERY_MAX_WORDS", 18) or 18),
             local_complex_query_min_chars=max(40, _env_int("ASTRA_LLM_COMPLEX_QUERY_MIN_CHARS", 260) or 260),
             local_complex_query_min_words=max(8, _env_int("ASTRA_LLM_COMPLEX_QUERY_MIN_WORDS", 45) or 45),
-            cloud_base_url=os.getenv("ASTRA_LLM_CLOUD_BASE_URL", "https://api.openai.com/v1"),
-            cloud_model=os.getenv("ASTRA_LLM_CLOUD_MODEL", "gpt-4.1"),
-            cloud_enabled=cloud_enabled,
-            auto_cloud_enabled=_env_bool("ASTRA_AUTO_CLOUD_ENABLED", False),
             max_concurrency=_env_int("ASTRA_LLM_MAX_CONCURRENCY", 1) or 1,
             chat_priority_extra_slots=max(0, _env_int("ASTRA_LLM_CHAT_PRIORITY_EXTRA_SLOTS", 1) or 0),
             chat_tier_timeout_s=max(5, _env_int("ASTRA_LLM_CHAT_TIER_TIMEOUT_S", 20) or 20),
-            max_retries=_env_int("ASTRA_LLM_MAX_RETRIES", 3) or 0,
-            backoff_base_ms=_env_int("ASTRA_LLM_BACKOFF_BASE_MS", 350) or 350,
             budget_per_run=_env_int("ASTRA_LLM_BUDGET_PER_RUN", None),
             budget_per_step=_env_int("ASTRA_LLM_BUDGET_PER_STEP", None),
         )
@@ -227,69 +199,21 @@ class BrainRouter:
             return response
 
         policy_flags = PolicyFlags.from_settings(ctx.settings if ctx else {})
-        if os.getenv("ASTRA_CLOUD_ENABLED") is not None:
-            policy_flags.cloud_allowed = self.config.cloud_enabled
-        if os.getenv("ASTRA_AUTO_CLOUD_ENABLED") is not None:
-            policy_flags.auto_cloud_enabled = self.config.auto_cloud_enabled
 
         context_items = request.context_items or []
         decision = decide_route(request.purpose, context_items, policy_flags)
 
         route = decision.route
         route_reason = decision.reason
-        heuristic_reason = self._auto_switch_reason(request, context_items, run_id, policy_flags)
-
-        if heuristic_reason and policy_flags.auto_cloud_enabled and policy_flags.cloud_allowed:
-            if decision.reason not in ("telegram_text_present", "strict_local"):
-                route = ROUTE_CLOUD
-                route_reason = heuristic_reason
-
-        approved_for_cloud = False
-        if decision.required_approval and route == ROUTE_CLOUD and policy_flags.auto_cloud_enabled and policy_flags.cloud_allowed:
-            approved_for_cloud = request_cloud_approval(ctx, decision, context_items)
-            if approved_for_cloud:
-                route = ROUTE_CLOUD
-                route_reason = "financial_file_approved"
-            else:
-                route = ROUTE_LOCAL
-                route_reason = "financial_file_not_approved"
-        elif decision.required_approval and route == ROUTE_CLOUD:
-            route = ROUTE_LOCAL
-            route_reason = "cloud_disabled"
 
         if decision.reason in ("telegram_text_present", "strict_local"):
             route = ROUTE_LOCAL
             route_reason = decision.reason
 
-        provider_name = "local" if route == ROUTE_LOCAL else "cloud"
+        provider_name = "local"
         model_id = self._select_model(route, request, ctx)
 
-        sanitize_result = None
         final_items = context_items
-        original_len = self._items_length(context_items)
-
-        if route == ROUTE_CLOUD:
-            sanitize_result = sanitize_context_items(context_items, approved_for_cloud, policy_flags)
-            final_items = sanitize_result.items
-            final_len = sanitize_result.total_chars
-            truncated_chars = max(0, original_len - final_len)
-            self._emit(
-                run_id,
-                "llm_request_sanitized",
-                "LLM request sanitized",
-                {
-                    "removed_counts_by_source_type": sanitize_result.removed_counts_by_source,
-                    "truncated_chars": truncated_chars,
-                    "final_len": final_len,
-                },
-                task_id=task_id,
-                step_id=step_id,
-            )
-            if final_len <= 0:
-                route = ROUTE_LOCAL
-                route_reason = "sanitized_empty_fallback"
-                provider_name = "local"
-                model_id = self._select_model(route, request, ctx)
 
         items_summary = self._items_summary_by_source(context_items)
         self._emit(
@@ -376,22 +300,18 @@ class BrainRouter:
                 step_id=step_id,
             )
 
-            if route == ROUTE_LOCAL:
-                result = self._call_local(messages, request, model_id)
-                response = LLMResponse(
-                    text=result.text,
-                    usage=result.usage,
-                    provider="local",
-                    model_id=result.model_id or model_id,
-                    latency_ms=int((time.time() - start) * 1000),
-                    cache_hit=False,
-                    route_reason=route_reason,
-                    raw=result.raw,
-                )
-                self._note_local_result(run_id, request.preferred_model_kind, response)
-            else:
-                response = self._call_cloud_with_retry(messages, request, model_id, start)
-                response.route_reason = route_reason
+            result = self._call_local(messages, request, model_id)
+            response = LLMResponse(
+                text=result.text,
+                usage=result.usage,
+                provider="local",
+                model_id=result.model_id or model_id,
+                latency_ms=int((time.time() - start) * 1000),
+                cache_hit=False,
+                route_reason=route_reason,
+                raw=result.raw,
+            )
+            self._note_local_result(run_id, request.preferred_model_kind, response)
 
             self._emit(
                 run_id,
@@ -502,57 +422,6 @@ class BrainRouter:
                 )
             raise
 
-    def _call_cloud_with_retry(self, messages: list[dict[str, Any]], request: LLMRequest, model_id: str, start: float) -> LLMResponse:
-        api_key = get_secret("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise ProviderError("OPENAI_API_KEY is missing", provider="cloud", error_type="missing_api_key")
-
-        provider = CloudLLMProvider(self.config.cloud_base_url, api_key)
-        attempt = 0
-        last_exc: ProviderError | None = None
-
-        while attempt <= self.config.max_retries:
-            try:
-                result = provider.chat(
-                    messages,
-                    model=model_id,
-                    temperature=request.temperature,
-                    max_tokens=request.max_tokens,
-                    json_schema=request.json_schema,
-                    tools=request.tools,
-                )
-                return self._make_response(
-                    text=result.text,
-                    provider="cloud",
-                    model_id=model_id,
-                    start_time=start,
-                    usage=result.usage,
-                    raw=result.raw,
-                    retry_count=attempt,
-                )
-            except ProviderError as exc:
-                last_exc = exc
-                status = exc.status_code or 0
-                if status == 429 or status >= 500:
-                    if attempt >= self.config.max_retries:
-                        break
-                    delay = self._backoff_delay(attempt)
-                    time.sleep(delay)
-                    attempt += 1
-                    continue
-                raise
-
-        if last_exc:
-            last_exc.retry_count = attempt
-            raise last_exc
-
-        raise ProviderError("Cloud LLM failed", provider="cloud", error_type="unknown")
-
-    def _backoff_delay(self, attempt: int) -> float:
-        base = self.config.backoff_base_ms / 1000.0
-        jitter = random.random() * base
-        return base * (2 ** attempt) + jitter
-
     def _make_response(
         self,
         *,
@@ -562,7 +431,7 @@ class BrainRouter:
         start_time: float,
         usage: dict | None = None,
         cache_hit: bool = False,
-        route_reason: str = "cloud",
+        route_reason: str = "local",
         raw: dict | None = None,
         retry_count: int = 0,
     ) -> LLMResponse:
@@ -586,18 +455,9 @@ class BrainRouter:
         raise ValueError("LLMRequest requires messages or render_messages")
 
     def _select_model(self, route: str, request: LLMRequest, ctx) -> str:
-        if route == ROUTE_LOCAL:
-            if request.preferred_model_kind == "code":
-                return self.config.local_code_model
-            return self._select_local_chat_model(request)
-
-        if ctx and ctx.settings:
-            cloud_cfg = ctx.settings.get("llm_cloud") or ctx.settings.get("llm") or {}
-            if cloud_cfg.get("model"):
-                return cloud_cfg.get("model")
-            if cloud_cfg.get("provider") == "openai" and cloud_cfg.get("base_url"):
-                self.config.cloud_base_url = cloud_cfg.get("base_url")
-        return self.config.cloud_model
+        if request.preferred_model_kind == "code":
+            return self.config.local_code_model
+        return self._select_local_chat_model(request)
 
     def _select_local_chat_model(self, request: LLMRequest) -> str:
         base_model = self.config.local_chat_model
@@ -664,27 +524,6 @@ class BrainRouter:
         if re.search(r"\b(архитект|план|сравни|объясни|деталь|подроб|анализ|формул|доказ|рефактор)\b", lowered):
             return True
         return False
-
-    def _auto_switch_reason(self, request: LLMRequest, items: list[ContextItem], run_id: str | None, flags: PolicyFlags) -> str | None:
-        if not flags.auto_cloud_enabled or not flags.cloud_allowed:
-            return None
-
-        if request.task_kind in {"heavy_writing", "long_form", "report"}:
-            if all(item.sensitivity == "public" for item in items):
-                return "heavy_writing"
-
-        if all(item.source_type == "web_page_text" for item in items) and self._items_length(items) >= 1200:
-            return "web_page_text_long"
-
-        key = (run_id or "", request.preferred_model_kind)
-        failures = self._local_failures.get(key, 0)
-        if failures >= 2:
-            return "local_failures"
-
-        if request.preferred_model_kind == "code" and failures >= 1:
-            return "code_local_failures"
-
-        return None
 
     def _items_length(self, items: Iterable[ContextItem]) -> int:
         total = 0

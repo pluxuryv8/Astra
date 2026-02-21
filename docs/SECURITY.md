@@ -44,11 +44,6 @@ Source: `core/secrets.py:71`, `core/secrets.py:75`, `core/secrets.py:77`, `core/
 - Шаги с danger флагами требуют approval (`core/planner.py:385`, `core/planner.py:1228`).
 - Исполнение проверяет approval до действий (`core/run_engine.py:34`, `core/skills/runner.py:39`, `core/executor/computer_executor.py:715`).
 
-## Cloud routing
-
-- Cloud выключается, если нет `OPENAI_API_KEY`, даже при `ASTRA_CLOUD_ENABLED=true` (`core/brain/router.py:75`, `core/brain/router.py:77`).
-- Для cloud-route выполняется санитизация контекста (`core/brain/router.py:235`, `core/llm_routing.py:183`).
-
 ## Minimal hardening checklist
 
 1. Включить `ASTRA_AUTH_MODE=strict`.

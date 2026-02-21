@@ -21,8 +21,6 @@ fi
 source "$ROOT_DIR/scripts/lib/address_config.sh"
 
 export ASTRA_AUTH_MODE="${ASTRA_AUTH_MODE:-local}"
-export ASTRA_CLOUD_ENABLED="${ASTRA_CLOUD_ENABLED:-false}"
-export ASTRA_AUTO_CLOUD_ENABLED="${ASTRA_AUTO_CLOUD_ENABLED:-false}"
 
 if ! command -v node >/dev/null 2>&1; then
   echo "Нужен Node.js (node). Установи Node и повтори запуск." >&2

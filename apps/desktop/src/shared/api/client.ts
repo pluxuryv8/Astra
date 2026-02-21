@@ -16,7 +16,6 @@ import { getToken, setLastRequest, setLastResponse } from "./authController";
 
 type ApiOptions = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
 
-type OpenAIStoreResponse = StatusResponse & { stored?: boolean };
 const API_BASE = getApiBaseUrl();
 
 function authHeaders() {
@@ -150,12 +149,4 @@ export function createReminder(payload: {
 
 export function cancelReminder(reminderId: string): Promise<Reminder> {
   return api<Reminder>(`/reminders/${reminderId}`, { method: "DELETE" });
-}
-
-export function storeOpenAIKeyLocal(apiKey: string): Promise<OpenAIStoreResponse> {
-  return api<OpenAIStoreResponse>("/secrets/openai_local", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
-}
-
-export function getLocalOpenAIStatus(): Promise<{ stored: boolean }> {
-  return api<{ stored: boolean }>("/secrets/openai_local");
 }

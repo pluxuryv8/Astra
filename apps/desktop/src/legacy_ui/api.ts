@@ -19,8 +19,6 @@ const API_BASE = getApiBaseUrl();
 const SESSION_KEY = "astra_session_token";
 let sessionToken: string | null = null;
 
-type OpenAIStoreResponse = StatusResponse & { stored?: boolean };
-
 export async function checkPermissions(): Promise<{
   screen_recording: "granted" | "denied" | "unknown";
   accessibility: "granted" | "denied" | "unknown";
@@ -237,18 +235,6 @@ export async function downloadArtifact(artifactId: string): Promise<Blob> {
 
 export async function downloadSnapshot(runId: string): Promise<Blob> {
   return apiBlob(`/runs/${runId}/snapshot/download`);
-}
-
-export function storeOpenAIKey(apiKey: string): Promise<OpenAIStoreResponse> {
-  return api<OpenAIStoreResponse>("/secrets/openai", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
-}
-
-export function storeOpenAIKeyLocal(apiKey: string): Promise<OpenAIStoreResponse> {
-  return api<OpenAIStoreResponse>("/secrets/openai_local", { method: "POST", body: JSON.stringify({ api_key: apiKey }) });
-}
-
-export function getLocalOpenAIStatus(): Promise<{ stored: boolean }> {
-  return api<{ stored: boolean }>("/secrets/openai_local");
 }
 
 export function apiBase() {

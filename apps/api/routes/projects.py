@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from apps.api.auth import require_auth
@@ -15,9 +17,9 @@ def create_project(payload: ProjectCreate):
     if not settings:
         settings = {
             "llm": {
-                "provider": "openai",
-                "base_url": "https://api.openai.com/v1",
-                "model": "gpt-4.1",
+                "provider": "local",
+                "base_url": os.getenv("ASTRA_LLM_LOCAL_BASE_URL", "http://127.0.0.1:11434"),
+                "model": os.getenv("ASTRA_LLM_LOCAL_CHAT_MODEL", "llama2-uncensored:7b"),
             }
         }
     project = store.create_project(payload.name, payload.tags, settings)

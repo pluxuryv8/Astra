@@ -219,7 +219,7 @@ def decide_semantic(
 
     privacy_settings = dict(settings or {})
     privacy = dict(privacy_settings.get("privacy") or {})
-    privacy.update({"strict_local": True, "cloud_allowed": False, "auto_cloud_enabled": False})
+    privacy.update({"strict_local": True})
     privacy_settings["privacy"] = privacy
     llm_ctx = SimpleNamespace(run={"id": run_id} if run_id else {}, task={}, plan_step={}, settings=privacy_settings)
 

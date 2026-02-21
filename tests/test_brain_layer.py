@@ -131,50 +131,6 @@ def test_chat_priority_can_use_extra_slot(monkeypatch):
     chat_thread.join(1)
 
 
-def test_backoff_on_429(monkeypatch):
-    monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
-    monkeypatch.setenv("OPENAI_API_KEY", "test")
-
-    cfg = BrainConfig.from_env()
-    cfg.max_retries = 2
-    cfg.backoff_base_ms = 1
-    router = BrainRouter(cfg)
-
-    attempts = {"count": 0}
-
-    class StubCloud:
-        def __init__(self, base_url, api_key):
-            self.base_url = base_url
-            self.api_key = api_key
-
-        def chat(self, messages, model, temperature=0.2, max_tokens=None, json_schema=None, tools=None):
-            attempts["count"] += 1
-            if attempts["count"] < 3:
-                raise ProviderError("rate limit", provider="cloud", status_code=429, error_type="http_error")
-            return ProviderResult(text="ok", usage=None, raw={})
-
-    monkeypatch.setattr("core.brain.router.CloudLLMProvider", StubCloud)
-    monkeypatch.setattr("time.sleep", lambda *_: None)
-
-    def build_messages(_items):
-        return [{"role": "user", "content": "hi"}]
-
-    request = LLMRequest(
-        purpose="test",
-        context_items=[ContextItem(content="web", source_type="web_page_text", sensitivity="public")],
-        render_messages=build_messages,
-        run_id="run-1",
-        task_id="task-1",
-        step_id="step-1",
-    )
-
-    ctx = _dummy_ctx()
-    response = router.call(request, ctx)
-
-    assert response.text == "ok"
-    assert attempts["count"] == 3
-
-
 def test_sanitizer_removes_telegram():
     items = [
         ContextItem(content="secret", source_type="telegram_text", sensitivity="personal"),
@@ -193,22 +149,13 @@ def test_sanitizer_removes_screenshot_text():
     assert result.removed_counts_by_source["screenshot_text"] == 1
 
 
-def test_financial_file_requires_approval(monkeypatch):
+def test_financial_file_stays_local_without_approval(monkeypatch):
     monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
 
     cfg = BrainConfig.from_env()
     router = BrainRouter(cfg)
 
-    approval_called = {"called": False}
-
-    def _approval(*args, **kwargs):
-        approval_called["called"] = True
-        return False
-
-    monkeypatch.setattr("core.brain.router.request_cloud_approval", _approval)
     monkeypatch.setattr(router, "_call_local", lambda messages, request, model_id: ProviderResult(text="ok", usage=None, raw={}))
-
-    router._local_failures[("run-1", "chat")] = 2
 
     def build_messages(_items):
         return [{"role": "user", "content": "hi"}]
@@ -225,15 +172,14 @@ def test_financial_file_requires_approval(monkeypatch):
     ctx = _dummy_ctx()
     response = router.call(request, ctx)
 
-    assert approval_called["called"] is True
     assert response.provider == "local"
 
 
-def test_select_model_uses_fast_and_complex_qwen_for_chat():
+def test_select_model_uses_fast_and_complex_tiers_for_chat():
     cfg = BrainConfig.from_env()
-    cfg.local_chat_model = "qwen2.5:7b-instruct"
-    cfg.local_chat_fast_model = "qwen2.5:3b-instruct"
-    cfg.local_chat_complex_model = "qwen2.5:14b-instruct"
+    cfg.local_chat_model = "llama2-uncensored:7b"
+    cfg.local_chat_fast_model = "llama2-uncensored:7b"
+    cfg.local_chat_complex_model = "wizardlm-uncensored:13b"
     router = BrainRouter(cfg)
 
     simple = LLMRequest(
@@ -249,17 +195,17 @@ def test_select_model_uses_fast_and_complex_qwen_for_chat():
         context_items=[ContextItem(content="compare", source_type="user_prompt", sensitivity="personal")],
     )
 
-    assert router._select_model(ROUTE_LOCAL, simple, _dummy_ctx()) == "qwen2.5:3b-instruct"
-    assert router._select_model(ROUTE_LOCAL, complex_query, _dummy_ctx()) == "qwen2.5:14b-instruct"
+    assert router._select_model(ROUTE_LOCAL, simple, _dummy_ctx()) == "llama2-uncensored:7b"
+    assert router._select_model(ROUTE_LOCAL, complex_query, _dummy_ctx()) == "wizardlm-uncensored:13b"
 
 
 def test_local_tier_model_falls_back_to_base_when_missing(monkeypatch):
     monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
 
     cfg = BrainConfig.from_env()
-    cfg.local_chat_model = "qwen2.5:7b-instruct"
-    cfg.local_chat_fast_model = "qwen2.5:3b-instruct"
-    cfg.local_chat_complex_model = "qwen2.5:14b-instruct"
+    cfg.local_chat_model = "llama2-uncensored:7b"
+    cfg.local_chat_fast_model = "llama2-uncensored:7b-fast"
+    cfg.local_chat_complex_model = "wizardlm-uncensored:13b"
     router = BrainRouter(cfg)
 
     calls: list[str] = []
@@ -270,7 +216,7 @@ def test_local_tier_model_falls_back_to_base_when_missing(monkeypatch):
 
         def chat(self, messages, *, model=None, model_kind="chat", **_kwargs):
             calls.append(model or "")
-            if model == "qwen2.5:3b-instruct":
+            if model == "llama2-uncensored:7b-fast":
                 raise ProviderError("missing model", provider="local", error_type="model_not_found")
             return ProviderResult(text="ok", usage=None, raw={"messages": messages}, model_id=model)
 
@@ -289,17 +235,17 @@ def test_local_tier_model_falls_back_to_base_when_missing(monkeypatch):
     response = router.call(request, _dummy_ctx())
 
     assert response.text == "ok"
-    assert response.model_id == "qwen2.5:7b-instruct"
-    assert calls == ["qwen2.5:3b-instruct", "qwen2.5:7b-instruct"]
+    assert response.model_id == "llama2-uncensored:7b"
+    assert calls == ["llama2-uncensored:7b-fast", "llama2-uncensored:7b"]
 
 
 def test_local_tier_model_falls_back_to_base_on_connection_error(monkeypatch):
     monkeypatch.setattr("core.brain.router.emit", lambda *args, **kwargs: None)
 
     cfg = BrainConfig.from_env()
-    cfg.local_chat_model = "qwen2.5:7b-instruct"
-    cfg.local_chat_fast_model = "qwen2.5:3b-instruct"
-    cfg.local_chat_complex_model = "qwen2.5:14b-instruct"
+    cfg.local_chat_model = "llama2-uncensored:7b"
+    cfg.local_chat_fast_model = "llama2-uncensored:7b-fast"
+    cfg.local_chat_complex_model = "wizardlm-uncensored:13b"
     cfg.chat_tier_timeout_s = 20
     router = BrainRouter(cfg)
 
@@ -311,7 +257,7 @@ def test_local_tier_model_falls_back_to_base_on_connection_error(monkeypatch):
 
         def chat(self, messages, *, model=None, model_kind="chat", **_kwargs):
             calls.append(model or "")
-            if model == "qwen2.5:3b-instruct":
+            if model == "llama2-uncensored:7b-fast":
                 raise ProviderError("timeout", provider="local", error_type="connection_error")
             return ProviderResult(text="ok", usage=None, raw={"messages": messages}, model_id=model)
 
@@ -330,5 +276,5 @@ def test_local_tier_model_falls_back_to_base_on_connection_error(monkeypatch):
     response = router.call(request, _dummy_ctx())
 
     assert response.text == "ok"
-    assert response.model_id == "qwen2.5:7b-instruct"
-    assert calls == ["qwen2.5:3b-instruct", "qwen2.5:7b-instruct"]
+    assert response.model_id == "llama2-uncensored:7b"
+    assert calls == ["llama2-uncensored:7b-fast", "llama2-uncensored:7b"]

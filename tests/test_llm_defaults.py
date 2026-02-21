@@ -16,11 +16,6 @@ def test_llm_defaults_local_models(monkeypatch):
         "ASTRA_LLM_COMPLEX_QUERY_MIN_CHARS",
         "ASTRA_LLM_COMPLEX_QUERY_MIN_WORDS",
         "ASTRA_LLM_LOCAL_BASE_URL",
-        "ASTRA_LLM_CLOUD_MODEL",
-        "ASTRA_LLM_CLOUD_BASE_URL",
-        "ASTRA_CLOUD_ENABLED",
-        "ASTRA_AUTO_CLOUD_ENABLED",
-        "OPENAI_API_KEY",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -36,5 +31,3 @@ def test_llm_defaults_local_models(monkeypatch):
     assert cfg.local_complex_query_min_words == 45
     assert cfg.chat_tier_timeout_s == 20
     assert cfg.local_code_model == "deepseek-coder-v2:16b-lite-instruct-q8_0"
-    assert cfg.cloud_enabled is False
-    assert cfg.auto_cloud_enabled is False

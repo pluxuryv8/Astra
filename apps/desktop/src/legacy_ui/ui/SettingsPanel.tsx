@@ -1,9 +1,6 @@
 type SettingsPanelProps = {
   modelName: string;
   onModelChange: (value: string) => void;
-  openaiKey: string;
-  onOpenaiKeyChange: (value: string) => void;
-  keyStored: boolean;
   apiAvailable: boolean | null;
   permissions: { screen_recording?: "granted" | "denied" | "unknown"; accessibility?: "granted" | "denied" | "unknown" } | null;
   mode: string;
@@ -22,9 +19,6 @@ type SettingsPanelProps = {
 export default function SettingsPanel({
   modelName,
   onModelChange,
-  openaiKey,
-  onOpenaiKeyChange,
-  keyStored,
   apiAvailable,
   permissions,
   mode,
@@ -44,7 +38,7 @@ export default function SettingsPanel({
       <div className="panel-header">
         <div>
           <div className="panel-title">Settings</div>
-          <div className="panel-subtitle">Модель, ключ, режимы</div>
+          <div className="panel-subtitle">Локальная модель и режимы</div>
         </div>
         <button className="btn ghost small" onClick={onClose} title="Закрыть">
           ✕
@@ -54,24 +48,13 @@ export default function SettingsPanel({
       {message ? <div className={`banner ${message.tone}`}>{message.text}</div> : null}
 
       <div className="panel-section">
-        <div className="section-title">Модель и ключ</div>
+        <div className="section-title">Локальная модель</div>
         <div className="status-row compact">
-          <span className={`pill ${keyStored ? "ok" : "warn"}`}>{keyStored ? "Ключ сохранён" : "Ключ не задан"}</span>
           <span className="status-chip">API: {apiAvailable === null ? "проверка" : apiAvailable ? "OK" : "нет"}</span>
         </div>
         <label className="field">
           <span>Модель</span>
           <input className="input" type="text" value={modelName} onChange={(e) => onModelChange(e.target.value)} />
-        </label>
-        <label className="field">
-          <span>Ключ</span>
-          <input
-            className="input"
-            type="password"
-            value={openaiKey}
-            onChange={(e) => onOpenaiKeyChange(e.target.value)}
-            placeholder="sk-..."
-          />
         </label>
         <button className="btn primary" onClick={onSave} disabled={saving}>
           {saving ? "Сохранение…" : "Сохранить"}

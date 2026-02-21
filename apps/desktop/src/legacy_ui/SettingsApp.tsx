@@ -3,10 +3,8 @@ import {
   checkApiStatus,
   checkPermissions,
   createProject,
-  getLocalOpenAIStatus,
   initAuth,
   listProjects,
-  storeOpenAIKeyLocal,
   updateProject
 } from "./api";
 import SettingsPanel from "./ui/SettingsPanel";
@@ -24,9 +22,7 @@ const RUN_MODE_KEY = "astra_run_mode";
 export default function SettingsApp() {
   const [, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
-  const [modelName, setModelName] = useState("gpt-4.1");
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [keyStored, setKeyStored] = useState(false);
+  const [modelName, setModelName] = useState("llama2-uncensored:7b");
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
   const [savingKey, setSavingKey] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<{ text: string; tone: "success" | "error" | "info" } | null>(null);
@@ -44,12 +40,12 @@ export default function SettingsApp() {
         const created = await createProject({ name: "Основной", tags: ["default"], settings: {} });
         setProjects([created]);
         setSelectedProject(created);
-        setModelName(created.settings?.llm?.model || "gpt-4.1");
+        setModelName(created.settings?.llm?.model || "llama2-uncensored:7b");
         return;
       }
       setProjects(data);
       setSelectedProject(data[0]);
-      setModelName(data[0].settings?.llm?.model || "gpt-4.1");
+      setModelName(data[0].settings?.llm?.model || "llama2-uncensored:7b");
     };
     setup().catch(() => setSettingsMessage({ text: "Не удалось загрузить проект", tone: "error" }));
   }, []);
@@ -68,12 +64,6 @@ export default function SettingsApp() {
     const check = async () => {
       const ok = await checkApiStatus();
       setApiAvailable(ok);
-      try {
-        const res = await getLocalOpenAIStatus();
-        setKeyStored(res.stored);
-      } catch {
-        setKeyStored(false);
-      }
     };
     void check();
   }, []);
@@ -91,27 +81,22 @@ export default function SettingsApp() {
     }
     try {
       setSavingKey(true);
-      if (openaiKey.trim()) {
-        await storeOpenAIKeyLocal(openaiKey.trim());
-        setKeyStored(true);
-        setOpenaiKey("");
-      }
       const current = selectedProject.settings || {};
       const llm = (current.llm || {}) as NonNullable<ProjectSettings["llm"]>;
       const nextSettings = {
         ...current,
         llm: {
           ...llm,
-          provider: "openai",
-          base_url: llm.base_url || "https://api.openai.com/v1",
-          model: modelName.trim() || llm.model || "gpt-4.1"
+          provider: "local",
+          base_url: llm.base_url || "http://127.0.0.1:11434",
+          model: modelName.trim() || llm.model || "llama2-uncensored:7b"
         }
       };
       const updated = await updateProject(selectedProject.id, { settings: nextSettings });
       setProjects((prev) => prev.map((proj) => (proj.id === updated.id ? updated : proj)));
       setSelectedProject(updated);
       setSettingsMessage({
-        text: openaiKey.trim() ? "Ключ и модель сохранены" : "Модель сохранена",
+        text: "Модель сохранена",
         tone: "success"
       });
     } catch {
@@ -126,9 +111,6 @@ export default function SettingsApp() {
       <SettingsPanel
         modelName={modelName}
         onModelChange={setModelName}
-        openaiKey={openaiKey}
-        onOpenaiKeyChange={setOpenaiKey}
-        keyStored={keyStored}
         apiAvailable={apiAvailable}
         permissions={permissions}
         mode={mode}

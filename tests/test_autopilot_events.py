@@ -64,7 +64,7 @@ def test_autopilot_events_persist(monkeypatch, tmp_path):
         "autopilot",
         [],
         {
-            "llm": {"provider": "openai", "base_url": "http://localhost:1234/v1", "model": "gpt-4.1-mini"},
+            "llm": {"provider": "local", "base_url": "http://127.0.0.1:11434", "model": "llama2-uncensored:7b"},
             "autopilot": {"max_cycles": 1, "max_actions": 1, "loop_delay_ms": 200},
         },
     )

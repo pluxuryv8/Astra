@@ -336,8 +336,6 @@ def _semantic_resilience_decision(error_code: str) -> IntentDecision:
 def _chat_resilience_text(error_type: str | None) -> str:
     if error_type == "budget_exceeded":
         return "Лимит обращений к модели исчерпан для этого запуска. Попробуй ещё раз чуть позже."
-    if error_type == "missing_api_key":
-        return "Облачная модель недоступна: не задан OPENAI_API_KEY."
     if error_type and "llm_call_failed" in error_type:
         return "Локальная модель сейчас недоступна. Проверь Ollama и выбранную модель, затем повтори запрос."
     if error_type in {"model_not_found", "http_error", "connection_error", "invalid_json", "chat_empty_response"}:

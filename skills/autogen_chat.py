@@ -253,7 +253,7 @@ def autogen_chat(
     user_proxy = UserProxyAgent(name="UserProxyAgent")
     adapter = OllamaAdapter(
         base_url=os.getenv("ASTRA_OLLAMA_URL", "http://127.0.0.1:11434"),
-        model=os.getenv("ASTRA_OLLAMA_MODEL", "qwen2.5:7b"),
+        model=os.getenv("ASTRA_OLLAMA_MODEL", "llama2-uncensored:7b"),
         timeout_s=float(os.getenv("ASTRA_AUTOGEN_TIMEOUT_S", "6")),
         enabled=_env_bool("ASTRA_AUTOGEN_OLLAMA", _env_bool("ASTRA_OLLAMA_ENABLE", False)),
     )

@@ -8,7 +8,6 @@ APPROVAL_TYPES = {
     "PAYMENT",
     "PUBLISH",
     "ACCOUNT_CHANGE",
-    "CLOUD_FINANCIAL",
 }
 
 DANGER_TO_APPROVAL = {
@@ -26,7 +25,6 @@ _APPROVAL_RISK = {
     "PAYMENT": "Оплата/перевод/подписка",
     "PUBLISH": "Публикация контента",
     "ACCOUNT_CHANGE": "Изменение настроек аккаунта или безопасности",
-    "CLOUD_FINANCIAL": "Передача финансовых данных в облако",
 }
 
 _SUGGESTED_ACTION = {
@@ -35,7 +33,6 @@ _SUGGESTED_ACTION = {
     "PAYMENT": "Подтвердите сумму и получателя",
     "PUBLISH": "Подтвердите площадку и содержание",
     "ACCOUNT_CHANGE": "Подтвердите изменение настроек аккаунта",
-    "CLOUD_FINANCIAL": "Подтвердите отправку финансовых данных в облако",
 }
 
 
@@ -92,25 +89,6 @@ def build_preview_for_step(run: dict, step: dict, approval_type: str) -> dict[st
         "expires_in_ms": None,
     }
     return preview
-
-
-def build_cloud_financial_preview(items: list[dict[str, Any]], redaction_summary: dict[str, Any] | None = None) -> dict[str, Any]:
-    files = []
-    for item in items:
-        if item.get("source_type") == "file_content":
-            files.append(item.get("provenance") or "UNKNOWN")
-    details = {
-        "file_paths": files or ["UNKNOWN"],
-        "content": "выжимка/фрагменты",
-        "redaction_summary": redaction_summary or {},
-    }
-    return {
-        "summary": "Отправка финансовых данных в облако",
-        "details": details,
-        "risk": _APPROVAL_RISK["CLOUD_FINANCIAL"],
-        "suggested_user_action": _SUGGESTED_ACTION["CLOUD_FINANCIAL"],
-        "expires_in_ms": None,
-    }
 
 
 def preview_summary(preview: dict[str, Any]) -> str:

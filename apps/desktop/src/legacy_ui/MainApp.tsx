@@ -19,8 +19,6 @@ import {
   checkApiStatus,
   getSessionToken,
   checkPermissions,
-  storeOpenAIKeyLocal,
-  getLocalOpenAIStatus,
   approve,
   reject,
   listUserMemory,
@@ -190,7 +188,7 @@ function extractProvider(payload?: Record<string, unknown> | null) {
     (typeof payload.provider === "string" ? payload.provider : null) ||
     (typeof payload.route === "string" ? payload.route : null);
   if (!raw) return null;
-  return raw.toLowerCase().includes("cloud") ? "cloud" : raw.toLowerCase().includes("local") ? "local" : raw;
+  return raw.toLowerCase().includes("local") ? "local" : raw;
 }
 
 export default function MainApp() {
@@ -215,7 +213,7 @@ export default function MainApp() {
     return stored === "pinned" || stored === "off" ? stored : "auto";
   });
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [modelName, setModelName] = useState("gpt-4.1");
+  const [modelName, setModelName] = useState("llama2-uncensored:7b");
   const [rightPanel, setRightPanel] = useState<RightPanel>("inspector");
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("steps");
   const [eventLimit, setEventLimit] = useState(EVENT_PAGE_SIZE);
@@ -230,8 +228,6 @@ export default function MainApp() {
   const [reminderLoading, setReminderLoading] = useState(false);
   const [reminderError, setReminderError] = useState<string | null>(null);
   const [apiAvailable, setApiAvailable] = useState<boolean | null>(null);
-  const [openaiKey, setOpenaiKey] = useState("");
-  const [keyStored, setKeyStored] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
   const [settingsMessage, setSettingsMessage] = useState<{ text: string; tone: "success" | "error" | "info" } | null>(null);
   const [permissions, setPermissions] = useState<PermissionsStatus | null>(null);
@@ -258,7 +254,6 @@ export default function MainApp() {
 
   const providerStats = useMemo(() => {
     let local = 0;
-    let cloud = 0;
     let last: string | null = null;
     for (const event of events) {
       if (event.type !== "llm_provider_used" && event.type !== "llm_route_decided") continue;
@@ -266,9 +261,8 @@ export default function MainApp() {
       if (!provider) continue;
       last = provider;
       if (provider === "local") local += 1;
-      if (provider === "cloud") cloud += 1;
     }
-    return { local, cloud, last };
+    return { local, last };
   }, [events]);
 
   const errorCount = useMemo(() => {
@@ -731,26 +725,21 @@ export default function MainApp() {
     }
     try {
       setSavingKey(true);
-      if (openaiKey.trim()) {
-        await storeOpenAIKeyLocal(openaiKey.trim());
-        setKeyStored(true);
-        setOpenaiKey("");
-      }
       const current = selectedProject.settings || {};
       const llm = (current.llm || {}) as NonNullable<ProjectSettings["llm"]>;
       const nextSettings = {
         ...current,
         llm: {
           ...llm,
-          provider: "openai",
-          base_url: llm.base_url || "https://api.openai.com/v1",
-          model: modelName.trim() || llm.model || "gpt-4.1"
+          provider: "local",
+          base_url: llm.base_url || "http://127.0.0.1:11434",
+          model: modelName.trim() || llm.model || "llama2-uncensored:7b"
         }
       };
       const updated = await updateProject(selectedProject.id, { settings: nextSettings });
       setProjects((prev) => prev.map((proj) => (proj.id === updated.id ? updated : proj)));
       setSettingsMessage({
-        text: openaiKey.trim() ? "Ключ и модель сохранены" : "Модель сохранена",
+        text: "Модель сохранена",
         tone: "success"
       });
     } catch {
@@ -758,7 +747,7 @@ export default function MainApp() {
     } finally {
       setSavingKey(false);
     }
-  }, [modelName, openaiKey, selectedProject]);
+  }, [modelName, selectedProject]);
 
   useEffect(() => {
     const setup = async () => {
@@ -787,7 +776,7 @@ export default function MainApp() {
     if (!selectedProject) return;
     localStorage.setItem(LAST_PROJECT_KEY, selectedProject.id);
     const llm = selectedProject.settings?.llm || {};
-    setModelName(llm.model || "gpt-4.1");
+    setModelName(llm.model || "llama2-uncensored:7b");
     refreshRuns(selectedProject.id)
       .then((list) => {
         const storedRun = localStorage.getItem(LAST_RUN_KEY);
@@ -872,12 +861,6 @@ export default function MainApp() {
     const check = async () => {
       const ok = await checkApiStatus();
       setApiAvailable(ok);
-      try {
-        const res = await getLocalOpenAIStatus();
-        setKeyStored(res.stored);
-      } catch {
-        setKeyStored(false);
-      }
     };
     void check();
   }, [rightPanel]);
@@ -1023,7 +1006,7 @@ export default function MainApp() {
               <span className="status-text">{agentStatus}</span>
               {providerStats.last ? (
                 <span className="status-chip">
-                  {providerStats.last === "local" ? "Local" : providerStats.last === "cloud" ? "Cloud" : providerStats.last}
+                  {providerStats.last === "local" ? "Local" : providerStats.last}
                 </span>
               ) : null}
               <span className={`status-chip ${streamState === "live" ? "ok" : "muted"}`}>
@@ -1133,9 +1116,6 @@ export default function MainApp() {
             <SettingsPanel
               modelName={modelName}
               onModelChange={setModelName}
-              openaiKey={openaiKey}
-              onOpenaiKeyChange={setOpenaiKey}
-              keyStored={keyStored}
               apiAvailable={apiAvailable}
               permissions={permissions}
               mode={mode}
@@ -1318,10 +1298,6 @@ export default function MainApp() {
                       <div className="metric-card">
                         <div className="metric-label">LLM Local</div>
                         <div className="metric-value">{providerStats.local}</div>
-                      </div>
-                      <div className="metric-card">
-                        <div className="metric-label">LLM Cloud</div>
-                        <div className="metric-value">{providerStats.cloud}</div>
                       </div>
                       <div className="metric-card">
                         <div className="metric-label">Active</div>

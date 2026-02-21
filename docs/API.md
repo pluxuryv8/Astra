@@ -73,7 +73,4 @@ SSE supports `last_event_id` and debug/test mode `once=1` (`apps/api/routes/run_
 
 - `GET /artifacts/{artifact_id}/download` (`apps/api/routes/artifacts.py:14`)
 - `POST /secrets/unlock` (`apps/api/routes/secrets.py:20`)
-- `POST /secrets/openai` (`apps/api/routes/secrets.py:26`)
-- `POST /secrets/openai_local` (`apps/api/routes/secrets.py:32`)
-- `GET /secrets/openai_local` (`apps/api/routes/secrets.py:39`)
-- `GET /secrets/status` (`apps/api/routes/secrets.py:45`)
+- `GET /secrets/status` (`apps/api/routes/secrets.py:25`)

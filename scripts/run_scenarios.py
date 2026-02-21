@@ -144,9 +144,9 @@ def _check_policy_routes(routes: list[dict[str, Any]]) -> tuple[bool, str]:
         telegram_count = summary.get("telegram_text") or 0
         screenshot_count = summary.get("screenshot_text") or 0
         if telegram_count and route != "LOCAL":
-            return False, "policy_telegram_cloud"
+            return False, "policy_telegram_nonlocal"
         if screenshot_count and route != "LOCAL":
-            return False, "policy_screenshot_cloud"
+            return False, "policy_screenshot_nonlocal"
     return True, "ok"
 
 

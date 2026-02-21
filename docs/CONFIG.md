@@ -47,16 +47,9 @@ Auth behavior:
 | `ASTRA_LLM_FAST_QUERY_MAX_WORDS` | Fast-model words threshold | `18` | `core/brain/router.py:96` |
 | `ASTRA_LLM_COMPLEX_QUERY_MIN_CHARS` | Complex-model char threshold | `260` | `core/brain/router.py:97` |
 | `ASTRA_LLM_COMPLEX_QUERY_MIN_WORDS` | Complex-model words threshold | `45` | `core/brain/router.py:98` |
-| `ASTRA_LLM_CLOUD_BASE_URL` | Cloud LLM base URL | `https://api.openai.com/v1` | `core/brain/router.py:99` |
-| `ASTRA_LLM_CLOUD_MODEL` | Cloud model | `gpt-4.1` | `core/brain/router.py:100` |
-| `ASTRA_CLOUD_ENABLED` | Enable cloud route | `false` | `core/brain/router.py:76`, `core/brain/router.py:194` |
-| `ASTRA_AUTO_CLOUD_ENABLED` | Auto-switch local -> cloud | `false` | `core/brain/router.py:97`, `core/brain/router.py:196` |
-| `OPENAI_API_KEY` | Cloud API key | none | `core/brain/router.py:75`, `core/brain/router.py:457` |
 | `ASTRA_LLM_MAX_CONCURRENCY` | LLM parallelism | `1` | `core/brain/router.py:103` |
 | `ASTRA_LLM_CHAT_PRIORITY_EXTRA_SLOTS` | Extra queue slots reserved for chat requests (`purpose=chat_response`) | `1` | `core/brain/router.py:104`, `core/brain/router.py:113` |
 | `ASTRA_LLM_CHAT_TIER_TIMEOUT_S` | Timeout (seconds) for fast/complex tier chat model before fallback to base chat model | `20` | `core/brain/router.py:105`, `core/brain/router.py:460` |
-| `ASTRA_LLM_MAX_RETRIES` | Cloud retries | `3` | `core/brain/router.py:105` |
-| `ASTRA_LLM_BACKOFF_BASE_MS` | Retry backoff base | `350` | `core/brain/router.py:106` |
 | `ASTRA_LLM_BUDGET_PER_RUN` | Budget per run | none | `core/brain/router.py:107` |
 | `ASTRA_LLM_BUDGET_PER_STEP` | Budget per step | none | `core/brain/router.py:108` |
 | `ASTRA_OWNER_DIRECT_MODE` | Chat system prompt mode | `true` | `apps/api/routes/runs.py:113` |

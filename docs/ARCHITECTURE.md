@@ -66,4 +66,4 @@ Default bind is loopback on port `43124` unless overridden by env (`apps/desktop
 - Auth modes: `local`, `strict` (`apps/api/auth.py:17`).
 - `local`: loopback exempt from bearer token (`apps/api/auth.py:78`, `apps/api/auth.py:83`).
 - `strict`: token required (`apps/api/auth.py:104`).
-- LLM route local/cloud with env policy flags (`core/brain/router.py:76`, `core/brain/router.py:97`, `core/brain/router.py:194`).
+- LLM работает в local-only режиме через Ollama (`core/brain/router.py`).
