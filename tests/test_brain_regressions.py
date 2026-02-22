@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -134,6 +135,50 @@ def test_regression_web_research_chat_text_sources_optional_when_absent(tmp_path
 
     assert text.startswith("Краткий итог:")
     assert "Источники:" not in text
+
+
+def test_smoke_anime_plot_query_produces_clean_final_text(tmp_path: Path) -> None:
+    query = "А сюжет хентая эйфория знаешь?"
+    answer_path = tmp_path / "web_answer_dirty.md"
+    answer_path.write_text(
+        (
+            "百度百科: случайный мусор и обрывки текста...\n"
+            "###!!!###\n"
+            "Сюжет Euphoria рассказывает о группе персонажей и их конфликте.\n"
+            "Финал ветвится на несколько арок, поэтому трактовки отличаются."
+        ),
+        encoding="utf-8",
+    )
+
+    result = SkillResult(
+        what_i_did="Собрал и сверил источники.",
+        artifacts=[
+            ArtifactCandidate(
+                type="web_research_answer_md",
+                title="answer",
+                content_uri=str(answer_path),
+            )
+        ],
+        sources=[
+            SourceCandidate(url="https://example.org/euphoria-plot", title="Euphoria plot summary"),
+            SourceCandidate(url="https://example.org/euphoria-review", title="Euphoria review"),
+        ],
+    )
+
+    composed = runs_route._compose_web_research_chat_text(result)
+    clean = runs_route._finalize_chat_user_visible_answer(
+        composed,
+        user_text=query,
+        response_mode="direct_answer",
+    )
+
+    assert clean.strip() != ""
+    assert "###!!!###" not in clean
+    assert "百度" not in clean
+    assert re.search(r"[\u4e00-\u9fff]", clean) is None
+    assert "Источники:" in clean
+    assert "Сюжет Euphoria" in clean
+    assert "https://example.org/euphoria-plot" in clean
 
 
 @pytest.mark.xfail(
