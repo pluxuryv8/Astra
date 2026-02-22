@@ -87,6 +87,55 @@ def test_regression_dirty_search_output_is_structured_and_deduplicated(tmp_path:
     assert text.count("https://example.com/b") == 1
 
 
+def test_regression_web_research_chat_text_enforces_summary_details_layout(tmp_path: Path) -> None:
+    answer_path = tmp_path / "web_answer.md"
+    answer_path.write_text(
+        "Проверил несколько источников и собрал главные факты. "
+        "Нужно обратить внимание на ограничения по данным.",
+        encoding="utf-8",
+    )
+
+    result = SkillResult(
+        what_i_did="Собрал и сверил источники.",
+        artifacts=[
+            ArtifactCandidate(
+                type="web_research_answer_md",
+                title="answer",
+                content_uri=str(answer_path),
+            )
+        ],
+        sources=[SourceCandidate(url="https://example.com/a", title="Источник A")],
+    )
+
+    text = runs_route._compose_web_research_chat_text(result)
+
+    assert text.startswith("Краткий итог:")
+    assert "\n\nДетали:\n" in text
+    assert "Источники:" in text
+
+
+def test_regression_web_research_chat_text_sources_optional_when_absent(tmp_path: Path) -> None:
+    answer_path = tmp_path / "web_answer.md"
+    answer_path.write_text("Краткий итог: Данные собраны.", encoding="utf-8")
+
+    result = SkillResult(
+        what_i_did="Собрал данные.",
+        artifacts=[
+            ArtifactCandidate(
+                type="web_research_answer_md",
+                title="answer",
+                content_uri=str(answer_path),
+            )
+        ],
+        sources=[],
+    )
+
+    text = runs_route._compose_web_research_chat_text(result)
+
+    assert text.startswith("Краткий итог:")
+    assert "Источники:" not in text
+
+
 @pytest.mark.xfail(
     reason="Known regression: planner defaults to COMPUTER_ACTIONS for complex non-UI requests without plan_hint.",
     strict=False,
@@ -120,4 +169,3 @@ def test_regression_chat_context_keeps_recent_constraints_across_turns(tmp_path:
     user_messages = [item["content"] for item in messages if item["role"] == "user"]
     assert any("короткий формат" in text.lower() for text in user_messages)
     assert messages[-1] == {"role": "user", "content": "дай следующий шаг"}
-

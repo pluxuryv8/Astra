@@ -1904,16 +1904,67 @@ def _format_web_research_sources(sources: list[SourceCandidate | dict[str, Any]]
     return "\n".join(lines)
 
 
+def _normalize_web_source_lines(block: str, *, limit: int = 7) -> list[str]:
+    lines: list[str] = []
+    seen_urls: set[str] = set()
+    for raw_line in str(block or "").splitlines():
+        line = " ".join(raw_line.split()).strip()
+        if not line:
+            continue
+        if _SOURCES_HEADER_RE.match(line):
+            continue
+        match = _URL_TEXT_RE.search(line)
+        if not match:
+            continue
+        url = match.group(0).strip()
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        lines.append(line if line.startswith("- ") else f"- {line}")
+        if len(lines) >= limit:
+            break
+    return lines
+
+
+def _ensure_summary_details_layout(text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    if value.lower().startswith("краткий итог:"):
+        return value
+
+    summary = _extract_summary(value)
+    if not summary:
+        return value
+
+    compact = " ".join(value.split()).strip()
+    remainder = compact
+    if compact.lower().startswith(summary.lower()):
+        remainder = compact[len(summary) :].lstrip(" .:-")
+    if remainder and _normalize_for_dedupe(remainder) != _normalize_for_dedupe(summary):
+        return f"Краткий итог: {summary}\n\nДетали:\n{remainder}"
+    return f"Краткий итог: {summary}"
+
+
 def _compose_web_research_chat_text(result: SkillResult) -> str:
     answer = _read_web_research_answer(result)
     if not answer:
         summary = str(result.what_i_did or "").strip()
         if summary:
             answer = f"{summary}\n\nЯ проверил источники и собрал данные из интернета."
-    sources_block = _format_web_research_sources(list(result.sources or []))
-    if sources_block and "источники:" not in answer.lower():
-        answer = f"{answer.strip()}\n\nИсточники:\n{sources_block}".strip()
-    return answer.strip()
+    answer = _finalize_user_visible_answer(answer)
+    main_text, existing_sources = _split_main_and_sources(answer)
+    main_text = _ensure_summary_details_layout(main_text)
+
+    source_lines: list[str] = []
+    source_lines.extend(_normalize_web_source_lines(existing_sources))
+    source_lines.extend(_normalize_web_source_lines(_format_web_research_sources(list(result.sources or []))))
+    deduped_sources = _dedupe_lines(source_lines)
+    sources_block = "\n".join(deduped_sources)
+
+    if sources_block:
+        return f"{main_text}\n\nИсточники:\n{sources_block}".strip()
+    return main_text.strip()
 
 
 def _persist_web_research_result(run_id: str, result: SkillResult) -> None:
