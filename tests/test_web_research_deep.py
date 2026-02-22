@@ -404,3 +404,40 @@ def test_deep_mode_invalid_judge_score_uses_fallback(monkeypatch, tmp_path: Path
 
     assert any("judge_fallback:invalid_score:5" in item for item in result.assumptions)
     assert any(evt.get("reason_code") == "judge_fallback" for evt in result.events)
+
+
+def test_url_normalization_dedups_tracking_variants():
+    urls = web_research._normalize_urls(
+        [
+            "https://example.org/path/?b=2&utm_source=ad&a=1",
+            "https://example.org/path?a=1&b=2",
+            "https://example.org/path/?a=1&b=2&utm_medium=cpc",
+        ]
+    )
+    assert urls == ["https://example.org/path?a=1&b=2"]
+
+
+def test_candidate_from_result_skips_blocked_domain():
+    candidate = web_research._candidate_from_result({"url": "https://www.baidu.com/s?wd=tokyo+ghoul"})
+    assert candidate is None
+
+
+def test_clean_extracted_text_rejects_cjk_noise_for_non_cjk_query():
+    noisy_text = "你好世界" * 80
+    cleaned = web_research._clean_extracted_text(noisy_text, query="кто такой кен канеки")
+    assert cleaned == ""
+
+
+def test_clean_answer_markdown_removes_noise_lines_and_duplicates():
+    markdown = (
+        "Краткий итог: Ответ найден.\n"
+        "####!!!!!####\n"
+        "你好你好你好你好你好\n"
+        "1. Факт A.\n"
+        "1. Факт A.\n"
+        "2. Факт B.\n"
+    )
+    cleaned = web_research._clean_answer_markdown(markdown, query="кто такой кен канеки")
+    assert "你好" not in cleaned
+    assert "####!!!!!####" not in cleaned
+    assert cleaned.count("1. Факт A.") == 1

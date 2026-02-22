@@ -5,7 +5,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from jsonschema import validate as jsonschema_validate
 
@@ -36,6 +36,30 @@ _HIGH_TRUST_DOMAINS = (
     "docs.",
     "developer.",
 )
+
+_BLOCKED_SOURCE_DOMAINS = (
+    "baidu.com",
+    "tieba.baidu.com",
+    "zhidao.baidu.com",
+)
+_TRACKING_QUERY_PARAMS = {
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "utm_id",
+    "gclid",
+    "fbclid",
+    "yclid",
+    "mc_cid",
+    "mc_eid",
+    "ref",
+    "ref_src",
+    "source",
+}
+_CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
+_CONTROL_TEXT_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 
 _DEEP_HINT_TOKENS = (
     "найди",
@@ -103,7 +127,7 @@ def _normalize_urls(value: Any) -> list[str]:
     dedup: list[str] = []
     seen: set[str] = set()
     for item in value:
-        url = str(item or "").strip()
+        url = _canonical_url(str(item or "").strip())
         if not url or url in seen:
             continue
         seen.add(url)
@@ -164,20 +188,52 @@ def _resolve_style_hint(inputs: dict[str, Any], ctx) -> str | None:
     return None
 
 
+def _is_blocked_domain(domain: str) -> bool:
+    value = str(domain or "").strip().lower()
+    if not value:
+        return False
+    return any(value == blocked or value.endswith(f".{blocked}") for blocked in _BLOCKED_SOURCE_DOMAINS)
+
+
 def _canonical_url(url: str) -> str:
-    normalized = url.strip()
-    return normalized[:-1] if normalized.endswith("/") else normalized
+    normalized = (url or "").strip()
+    if not normalized:
+        return ""
+    try:
+        parsed = urlparse(normalized)
+        scheme = (parsed.scheme or "https").lower()
+        netloc = parsed.netloc.lower()
+        if not netloc:
+            return normalized
+        path = re.sub(r"/{2,}", "/", parsed.path or "/")
+        if path != "/" and path.endswith("/"):
+            path = path[:-1]
+        query_pairs = []
+        for key, value in parse_qsl(parsed.query, keep_blank_values=False):
+            key_clean = str(key or "").strip().lower()
+            if not key_clean or key_clean in _TRACKING_QUERY_PARAMS or key_clean.startswith("utm_"):
+                continue
+            value_clean = str(value or "").strip()
+            query_pairs.append((key_clean, value_clean))
+        query_pairs.sort()
+        query = urlencode(query_pairs, doseq=True)
+        return urlunparse((scheme, netloc, path, "", query, ""))
+    except Exception:
+        return normalized[:-1] if normalized.endswith("/") else normalized
 
 
 def _candidate_from_result(item: dict[str, Any]) -> dict[str, Any] | None:
-    url = str(item.get("url") or "").strip()
+    url = _canonical_url(str(item.get("url") or "").strip())
     if not url:
         return None
+    domain = _domain(url)
+    if _is_blocked_domain(domain):
+        return None
     return {
-        "url": _canonical_url(url),
+        "url": url,
         "title": item.get("title"),
         "snippet": item.get("snippet"),
-        "domain": _domain(url),
+        "domain": domain,
     }
 
 
@@ -365,10 +421,91 @@ def _cache_file_path(ctx, run_id: str, url: str) -> Path:
 
 
 def _normalize_plain_text(text: str, max_chars: int = 25_000) -> str:
-    compact = " ".join((text or "").split())
+    compact = " ".join(_CONTROL_TEXT_RE.sub(" ", text or "").replace("\uFFFD", "").split())
     if len(compact) > max_chars:
         compact = compact[:max_chars].rstrip() + "..."
     return compact
+
+
+def _is_mostly_cjk(text: str) -> bool:
+    body = str(text or "")
+    if not body:
+        return False
+    non_space = sum(1 for char in body if not char.isspace())
+    if non_space == 0:
+        return False
+    cjk = len(_CJK_CHAR_RE.findall(body))
+    return cjk >= 40 and (cjk / max(1, non_space)) >= 0.45
+
+
+def _is_symbol_noise_line(text: str) -> bool:
+    line = str(text or "").strip()
+    if not line:
+        return False
+    printable = sum(1 for char in line if not char.isspace())
+    if printable == 0:
+        return True
+    alnum = sum(1 for char in line if char.isalnum())
+    symbols = printable - alnum
+    return symbols > max(10, alnum * 3)
+
+
+def _clean_extracted_text(text: str, *, query: str, max_chars: int = 20_000) -> str:
+    compact = _normalize_plain_text(text, max_chars=max_chars)
+    if not compact:
+        return ""
+
+    query_has_cjk = bool(_CJK_CHAR_RE.search(query or ""))
+    if not query_has_cjk and _is_mostly_cjk(compact):
+        return ""
+
+    if _is_symbol_noise_line(compact[:400]):
+        return ""
+    return compact
+
+
+def _clean_answer_markdown(answer_markdown: str, *, query: str, max_chars: int = 12_000) -> str:
+    normalized = _CONTROL_TEXT_RE.sub(" ", str(answer_markdown or "")).replace("\uFFFD", "")
+    query_has_cjk = bool(_CJK_CHAR_RE.search(query or ""))
+    lines: list[str] = []
+    seen: set[str] = set()
+    for raw_line in normalized.splitlines():
+        compact = " ".join(raw_line.split()).strip()
+        if not compact:
+            if lines and lines[-1] != "":
+                lines.append("")
+            continue
+        if _is_symbol_noise_line(compact):
+            continue
+        if not query_has_cjk:
+            if _is_mostly_cjk(compact):
+                continue
+            cjk_count = len(_CJK_CHAR_RE.findall(compact))
+            non_space = max(1, sum(1 for char in compact if not char.isspace()))
+            if cjk_count >= 4 and (cjk_count / non_space) >= 0.4:
+                continue
+        key = compact.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(compact)
+
+    cleaned = "\n".join(lines).strip()
+    if len(cleaned) > max_chars:
+        cleaned = cleaned[: max_chars - 1].rstrip() + "…"
+    return cleaned
+
+
+def _dedupe_urls(urls: list[str]) -> list[str]:
+    dedup: list[str] = []
+    seen: set[str] = set()
+    for raw in urls:
+        canonical = _canonical_url(str(raw or "").strip())
+        if not canonical or canonical in seen:
+            continue
+        seen.add(canonical)
+        dedup.append(canonical)
+    return dedup
 
 
 def _fetch_and_extract_cached(
@@ -446,6 +583,7 @@ def _write_answer_artifact(
     *,
     run_id: str,
     answer_markdown: str,
+    query: str,
     depth: str,
     rounds: int,
     sources_used: int,
@@ -453,7 +591,8 @@ def _write_answer_artifact(
     out_dir = Path(ctx.base_dir) / "artifacts" / run_id
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "web_research_answer.md"
-    path.write_text(answer_markdown, encoding="utf-8")
+    cleaned_answer = _clean_answer_markdown(answer_markdown, query=query)
+    path.write_text(cleaned_answer, encoding="utf-8")
     return ArtifactCandidate(
         type="web_research_answer_md",
         title="Web Research Answer",
@@ -785,8 +924,25 @@ def _run_deep_mode(
                     )
                 )
                 continue
-            extracted_text = str(page.get("extracted_text") or "").strip()
+            raw_extracted_text = str(page.get("extracted_text") or "")
+            language_mismatch = not bool(_CJK_CHAR_RE.search(current_query or "")) and _is_mostly_cjk(raw_extracted_text)
+            extracted_text = _clean_extracted_text(
+                raw_extracted_text,
+                query=current_query,
+            )
             if not extracted_text:
+                if language_mismatch:
+                    assumptions.append(f"{candidate['url']}: source_language_mismatch")
+                    progress_events.append(
+                        _progress_event(
+                            "Источник отклонён из-за языкового шума",
+                            current=round_index,
+                            total=max_rounds,
+                            reason_code="source_language_mismatch",
+                            extra={"url": candidate["url"]},
+                        )
+                    )
+                    continue
                 assumptions.append(f"{candidate['url']}: empty_extracted_text")
                 progress_events.append(
                     _progress_event(
@@ -848,12 +1004,15 @@ def _run_deep_mode(
         if fetched_this_round == 0:
             if evidence_map:
                 fallback_payload = _compose_answer_fallback(query=current_query or query, evidence_map=evidence_map)
-                used_urls = [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+                used_urls = _dedupe_urls(
+                    [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+                )
                 sources = [_source_from_evidence(evidence_map[url]) for url in used_urls]
                 artifact = _write_answer_artifact(
                     ctx,
                     run_id=run_id,
                     answer_markdown=str(fallback_payload.get("answer_markdown") or "").strip(),
+                    query=current_query or query,
                     depth=depth,
                     rounds=round_index,
                     sources_used=len(sources),
@@ -1003,9 +1162,13 @@ def _run_deep_mode(
                 answer_markdown = str(answer_payload.get("answer_markdown") or "").strip()
                 assumptions.append("answer_fallback:empty_answer_markdown")
 
-            used_urls = [url for url in answer_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+            used_urls = _dedupe_urls(
+                [url for url in answer_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+            )
             if not used_urls:
-                used_urls = [url for url in judge.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+                used_urls = _dedupe_urls(
+                    [url for url in judge.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+                )
             if not used_urls:
                 used_urls = list(evidence_map.keys())[:3]
 
@@ -1017,6 +1180,7 @@ def _run_deep_mode(
                 ctx,
                 run_id=run_id,
                 answer_markdown=answer_markdown,
+                query=current_query,
                 depth=depth,
                 rounds=round_index,
                 sources_used=len(sources),
@@ -1032,12 +1196,15 @@ def _run_deep_mode(
 
         if decision != "NOT_ENOUGH":
             fallback_payload = _compose_answer_fallback(query=current_query, evidence_map=evidence_map)
-            used_urls = [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+            used_urls = _dedupe_urls(
+                [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+            )
             sources = [_source_from_evidence(evidence_map[url]) for url in used_urls]
             artifact = _write_answer_artifact(
                 ctx,
                 run_id=run_id,
                 answer_markdown=str(fallback_payload.get("answer_markdown") or "").strip(),
+                query=current_query,
                 depth=depth,
                 rounds=round_index,
                 sources_used=len(sources),
@@ -1058,12 +1225,15 @@ def _run_deep_mode(
             continue
         if not next_query:
             fallback_payload = _compose_answer_fallback(query=current_query, evidence_map=evidence_map)
-            used_urls = [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+            used_urls = _dedupe_urls(
+                [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+            )
             sources = [_source_from_evidence(evidence_map[url]) for url in used_urls]
             artifact = _write_answer_artifact(
                 ctx,
                 run_id=run_id,
                 answer_markdown=str(fallback_payload.get("answer_markdown") or "").strip(),
+                query=current_query,
                 depth=depth,
                 rounds=round_index,
                 sources_used=len(sources),
@@ -1082,12 +1252,15 @@ def _run_deep_mode(
 
     if evidence_map:
         fallback_payload = _compose_answer_fallback(query=current_query or query, evidence_map=evidence_map)
-        used_urls = [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+        used_urls = _dedupe_urls(
+            [url for url in fallback_payload.get("used_urls", []) if isinstance(url, str) and url in evidence_map]
+        )
         sources = [_source_from_evidence(evidence_map[url]) for url in used_urls]
         artifact = _write_answer_artifact(
             ctx,
             run_id=run_id,
             answer_markdown=str(fallback_payload.get("answer_markdown") or "").strip(),
+            query=current_query or query,
             depth=depth,
             rounds=max_rounds,
             sources_used=len(sources),
