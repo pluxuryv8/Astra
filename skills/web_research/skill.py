@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -143,6 +144,15 @@ def _coerce_positive_int(value: Any, default: int) -> int:
         if parsed > 0:
             return parsed
     return default
+
+
+def _coerce_positive_int_bounded(value: Any, default: int, *, min_value: int, max_value: int) -> int:
+    coerced = _coerce_positive_int(value, default)
+    return max(min_value, min(max_value, coerced))
+
+
+def _env_positive_int(name: str, default: int, *, min_value: int, max_value: int) -> int:
+    return _coerce_positive_int_bounded(os.getenv(name), default, min_value=min_value, max_value=max_value)
 
 
 def _looks_like_deep_request(query: str) -> bool:
@@ -1289,9 +1299,27 @@ def run(inputs: dict, ctx) -> SkillResult:
 
     depth = _resolve_depth(inputs.get("depth"), query)
     style_hint = _resolve_style_hint(inputs, ctx)
-    max_rounds = _coerce_positive_int(inputs.get("max_rounds"), DEFAULT_MAX_ROUNDS)
-    max_sources_total = _coerce_positive_int(inputs.get("max_sources_total"), DEFAULT_MAX_SOURCES_TOTAL)
-    max_pages_fetch = _coerce_positive_int(inputs.get("max_pages_fetch"), DEFAULT_MAX_PAGES_FETCH)
+    max_rounds_default = _env_positive_int("ASTRA_WEB_RESEARCH_MAX_ROUNDS", DEFAULT_MAX_ROUNDS, min_value=1, max_value=8)
+    max_sources_default = _env_positive_int(
+        "ASTRA_WEB_RESEARCH_MAX_SOURCES_TOTAL",
+        DEFAULT_MAX_SOURCES_TOTAL,
+        min_value=1,
+        max_value=40,
+    )
+    max_pages_default = _env_positive_int("ASTRA_WEB_RESEARCH_MAX_PAGES_FETCH", DEFAULT_MAX_PAGES_FETCH, min_value=1, max_value=20)
+    max_rounds = _coerce_positive_int_bounded(inputs.get("max_rounds"), max_rounds_default, min_value=1, max_value=8)
+    max_sources_total = _coerce_positive_int_bounded(
+        inputs.get("max_sources_total"),
+        max_sources_default,
+        min_value=1,
+        max_value=40,
+    )
+    max_pages_fetch = _coerce_positive_int_bounded(
+        inputs.get("max_pages_fetch"),
+        max_pages_default,
+        min_value=1,
+        max_value=20,
+    )
     return _run_deep_mode(
         query,
         urls,

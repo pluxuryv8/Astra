@@ -441,3 +441,62 @@ def test_clean_answer_markdown_removes_noise_lines_and_duplicates():
     assert "你好" not in cleaned
     assert "####!!!!!####" not in cleaned
     assert cleaned.count("1. Факт A.") == 1
+
+
+def test_deep_mode_uses_env_limits_when_inputs_absent(monkeypatch, tmp_path: Path):
+    ctx = _ctx(tmp_path)
+    captured: dict[str, int] = {}
+
+    def _fake_run_deep(query, urls, *, depth, style_hint, max_rounds, max_sources_total, max_pages_fetch, ctx):  # noqa: ANN001
+        captured["max_rounds"] = max_rounds
+        captured["max_sources_total"] = max_sources_total
+        captured["max_pages_fetch"] = max_pages_fetch
+        return web_research.SkillResult(what_i_did="ok", confidence=0.1)
+
+    monkeypatch.setenv("ASTRA_WEB_RESEARCH_MAX_ROUNDS", "4")
+    monkeypatch.setenv("ASTRA_WEB_RESEARCH_MAX_SOURCES_TOTAL", "18")
+    monkeypatch.setenv("ASTRA_WEB_RESEARCH_MAX_PAGES_FETCH", "9")
+    monkeypatch.setattr(web_research, "_run_deep_mode", _fake_run_deep)
+
+    result = web_research.run({"query": "initial query", "mode": "deep"}, ctx)
+
+    assert result.confidence == 0.1
+    assert captured == {
+        "max_rounds": 4,
+        "max_sources_total": 18,
+        "max_pages_fetch": 9,
+    }
+
+
+def test_deep_mode_inputs_override_env_and_are_clamped(monkeypatch, tmp_path: Path):
+    ctx = _ctx(tmp_path)
+    captured: dict[str, int] = {}
+
+    def _fake_run_deep(query, urls, *, depth, style_hint, max_rounds, max_sources_total, max_pages_fetch, ctx):  # noqa: ANN001
+        captured["max_rounds"] = max_rounds
+        captured["max_sources_total"] = max_sources_total
+        captured["max_pages_fetch"] = max_pages_fetch
+        return web_research.SkillResult(what_i_did="ok", confidence=0.1)
+
+    monkeypatch.setenv("ASTRA_WEB_RESEARCH_MAX_ROUNDS", "2")
+    monkeypatch.setenv("ASTRA_WEB_RESEARCH_MAX_SOURCES_TOTAL", "6")
+    monkeypatch.setenv("ASTRA_WEB_RESEARCH_MAX_PAGES_FETCH", "3")
+    monkeypatch.setattr(web_research, "_run_deep_mode", _fake_run_deep)
+
+    result = web_research.run(
+        {
+            "query": "initial query",
+            "mode": "deep",
+            "max_rounds": 99,
+            "max_sources_total": 999,
+            "max_pages_fetch": 999,
+        },
+        ctx,
+    )
+
+    assert result.confidence == 0.1
+    assert captured == {
+        "max_rounds": 8,
+        "max_sources_total": 40,
+        "max_pages_fetch": 20,
+    }

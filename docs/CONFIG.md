@@ -52,7 +52,17 @@
 | `ASTRA_LLM_BUDGET_PER_RUN` | `none` | Лимит LLM-вызовов на run. |
 | `ASTRA_LLM_BUDGET_PER_STEP` | `none` | Лимит LLM-вызовов на step. |
 
-## 5) Практический baseline (качество сначала)
+## 5) Web research skill limits (`skills/web_research/skill.py`)
+
+| Variable | Default | Effect |
+|---|---:|---|
+| `ASTRA_WEB_RESEARCH_MAX_ROUNDS` | `3` | Дефолтный лимит раундов deep-режима (`1..8`) для skill `web_research`. |
+| `ASTRA_WEB_RESEARCH_MAX_SOURCES_TOTAL` | `12` | Дефолтный общий лимит источников (`1..40`) в deep-режиме. |
+| `ASTRA_WEB_RESEARCH_MAX_PAGES_FETCH` | `6` | Дефолтный лимит fetch-страниц (`1..20`) в deep-режиме. |
+
+Примечание: `inputs.max_rounds`, `inputs.max_sources_total`, `inputs.max_pages_fetch` имеют приоритет над ENV, но также ограничиваются теми же безопасными диапазонами.
+
+## 6) Практический baseline (качество сначала)
 
 Рекомендуемый старт для твоего текущего фокуса на качестве:
 
