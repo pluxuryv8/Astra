@@ -51,6 +51,7 @@ _SOFT_RETRY_UNWANTED_PREFIXES = (
     "согласно политике", "ограничения безопасности"
 )
 _CYRILLIC_RE = re.compile(r"[А-Яа-яЁё]")
+_CJK_CHAR_RE = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]")
 _RELEVANCE_TOKEN_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9]+")
 _FIRST_PERSON_RU_RE = re.compile(r"\b(я|мне|меня|мой|моя|моё|мои|мною)\b", flags=re.IGNORECASE)
 _FIRST_PERSON_NARRATIVE_RU_RE = re.compile(
@@ -1702,6 +1703,121 @@ def _finalize_user_visible_answer(text: str) -> str:
     return _postprocess_user_visible_answer(sanitized)
 
 
+def _query_has_cjk(text: str) -> bool:
+    return bool(_CJK_CHAR_RE.search(text or ""))
+
+
+def _is_cjk_noise_line(user_text: str, line: str) -> bool:
+    if not line or _query_has_cjk(user_text):
+        return False
+    cjk_count = len(_CJK_CHAR_RE.findall(line))
+    if cjk_count < 2:
+        return False
+    non_space = max(1, sum(1 for char in line if not char.isspace()))
+    if (cjk_count / non_space) >= 0.12:
+        return True
+    return bool(_CJK_CHAR_RE.match(line))
+
+
+def _is_broken_fragment_line(line: str) -> bool:
+    value = " ".join((line or "").split()).strip()
+    if not value:
+        return False
+    if re.match(r"^(?:\d+[.)]\s+|- )", value):
+        return False
+    if len(value) <= 5:
+        return True
+    if value.endswith(("...", "…", ":", ";", ",", "—", "-")) and len(value) <= 60:
+        return True
+    words = [item for item in re.split(r"\s+", value) if item]
+    return len(words) <= 2 and len(value) <= 18
+
+
+def _needs_noise_rebuild(text: str, *, user_text: str) -> bool:
+    value = (text or "").strip()
+    if not value:
+        return False
+    if not _query_has_cjk(user_text) and _CJK_CHAR_RE.search(value):
+        return True
+    if _is_noise_block(value):
+        return True
+
+    noisy_lines = 0
+    broken_lines = 0
+    for raw in value.splitlines():
+        line = " ".join(raw.split()).strip()
+        if not line:
+            continue
+        if _is_cjk_noise_line(user_text, line):
+            noisy_lines += 1
+            continue
+        if _is_noise_block(line):
+            noisy_lines += 1
+            continue
+        if _is_broken_fragment_line(line):
+            broken_lines += 1
+    return noisy_lines >= 1 or broken_lines >= 2
+
+
+def _rebuild_answer_from_valid_fragments(text: str, *, user_text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    main_text, sources_text = _split_main_and_sources(value)
+
+    valid_lines: list[str] = []
+    for raw in main_text.splitlines():
+        line = " ".join(raw.split()).strip()
+        if not line:
+            continue
+        if not _query_has_cjk(user_text) and _CJK_CHAR_RE.search(line):
+            continue
+        if _is_cjk_noise_line(user_text, line):
+            continue
+        if _is_noise_block(line):
+            continue
+        if _is_broken_fragment_line(line):
+            continue
+        valid_lines.append(line)
+    valid_lines = _dedupe_lines(valid_lines)
+    if not valid_lines:
+        return ""
+
+    rebuilt_main = _postprocess_user_visible_answer("\n".join(valid_lines))
+    if not rebuilt_main:
+        return ""
+
+    source_lines: list[str] = []
+    for raw in sources_text.splitlines():
+        line = " ".join(raw.split()).strip()
+        if not line or _SOURCES_HEADER_RE.match(line):
+            continue
+        if not _URL_TEXT_RE.search(line):
+            continue
+        if _is_noise_block(line):
+            continue
+        source_lines.append(line if line.startswith("- ") else f"- {line}")
+    source_lines = _dedupe_lines(source_lines)
+    if source_lines:
+        return f"{rebuilt_main}\n\nИсточники:\n" + "\n".join(source_lines)
+    return rebuilt_main
+
+
+def _repair_noisy_chat_answer(text: str, *, user_text: str) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    if not _needs_noise_rebuild(value, user_text=user_text):
+        return value
+
+    rebuilt = _rebuild_answer_from_valid_fragments(value, user_text=user_text)
+    if rebuilt:
+        return rebuilt
+
+    fallback = _chat_resilience_text("chat_noisy_response", user_text=user_text)
+    return _finalize_user_visible_answer(fallback)
+
+
 def _user_requested_detailed_answer(user_text: str, response_mode: str | None) -> bool:
     if response_mode == _CHAT_RESPONSE_MODE_PLAN:
         return True
@@ -1777,8 +1893,9 @@ def _finalize_chat_user_visible_answer(
     finalized = _finalize_user_visible_answer(text)
     if not finalized:
         return ""
+    repaired = _repair_noisy_chat_answer(finalized, user_text=user_text)
     return _apply_chat_brevity_limit(
-        finalized,
+        repaired or finalized,
         user_text=user_text,
         response_mode=response_mode,
     )

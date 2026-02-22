@@ -629,6 +629,39 @@ def test_chat_brevity_limit_preserves_full_answer_for_step_mode(monkeypatch):
     assert detailed == baseline
 
 
+def test_chat_noisy_output_rebuilds_from_valid_fragments():
+    raw = (
+        "百度百科: случайный шум и мусор.\n"
+        "####!!!!!####\n"
+        "Краткий итог: Кен Канеки - главный герой Tokyo Ghoul.\n"
+        "1. Факт подтверждается в нескольких источниках.\n"
+        "2. Есть разные адаптации и версии сюжета."
+    )
+    clean = runs_route._finalize_chat_user_visible_answer(
+        raw,
+        user_text="кто такой кен канеки",
+        response_mode="direct_answer",
+    )
+
+    assert "百度" not in clean
+    assert "####!!!!!####" not in clean
+    assert "Краткий итог:" in clean
+    assert "Кен Канеки" in clean
+
+
+def test_chat_noisy_output_falls_back_when_no_valid_fragments():
+    raw = "百度百科 百度百科 ####!!!!!#### 。。。。"
+    clean = runs_route._finalize_chat_user_visible_answer(
+        raw,
+        user_text="кто такой кен канеки",
+        response_mode="direct_answer",
+    )
+
+    assert clean.startswith("Краткий итог:")
+    assert "Не удалось стабильно получить ответ от модели." in clean
+    assert "кто такой кен канеки" in clean
+
+
 def test_chat_resilience_text_is_useful_and_structured():
     text = runs_route._chat_resilience_text("connection_error", user_text="кто такой кен канеки")
     assert text.startswith("Краткий итог:")
