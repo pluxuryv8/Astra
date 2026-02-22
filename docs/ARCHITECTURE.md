@@ -1,69 +1,86 @@
 # Architecture (Current State)
 
-## Components
+## 1) Компоненты
 
-- Desktop UI: `apps/desktop` (`Tauri + React`) (`apps/desktop/package.json:1`, `apps/desktop/src-tauri/tauri.conf.json:1`).
-- API: `apps/api` (`FastAPI`) (`apps/api/main.py:24`).
-- Core orchestration: planner/engine/skills in `core/` (`core/planner.py:22`, `core/run_engine.py:16`).
-- Persistent state: SQLite store + migrations in `memory/` (`memory/store.py:20`, `memory/db.py:63`).
-- Executable skills: `skills/*` + manifests (`core/skills/registry.py:31`, `skills/registry/registry.json:1`).
+- Desktop UI: `apps/desktop` (`Tauri + React`).
+- API: `apps/api` (`FastAPI`).
+- Оркестрация и навыки: `core/` + `skills/`.
+- Хранилище: `SQLite` через `memory/store.py` и `memory/db.py`.
+- События и стриминг: event store + SSE (`apps/api/routes/run_events.py`).
 
-## Main Runtime Flow
+## 2) Точка входа run
 
-1. Desktop sends request to API: `POST /api/v1/projects/{project_id}/runs` (`apps/api/routes/runs.py:465`).
-2. API decides intent (`CHAT`, `ACT`, `ASK_CLARIFY`) via `IntentRouter` + semantic layer (`apps/api/routes/runs.py:492`, `core/intent_router.py:87`).
-3. `CHAT`: return `chat_response` (with fallback on LLM failures) (`apps/api/routes/runs.py:662`, `apps/api/routes/runs.py:733`).
-4. `ACT`: create plan and run skills (`apps/api/routes/runs.py:652`, `core/run_engine.py:24`, `core/run_engine.py:164`).
-5. Events are persisted and streamed to UI through SSE (`memory/store.py:1421`, `apps/api/routes/run_events.py:15`, `apps/desktop/src/shared/api/eventStream.ts:145`).
+Основная точка входа: `POST /api/v1/projects/{project_id}/runs` в `apps/api/routes/runs.py`.
 
-## Planning and Skills
+При создании run происходит:
 
-Plan kinds and mapping to skills are hardcoded in planner:
+1. Валидация проекта и режима.
+2. Создание run в store (`created`).
+3. Эмит `run_created`.
+4. Определение intent через `IntentRouter` или fast-path.
 
-- `WEB_RESEARCH` -> `web_research`
-- `MEMORY_COMMIT` -> `memory_save`
-- `REMINDER_CREATE` -> `reminder_create`
-- `BROWSER_RESEARCH_UI`/`COMPUTER_ACTIONS`/`DOCUMENT_WRITE`/`FILE_ORGANIZE`/`CODE_ASSIST` -> `autopilot_computer`
+## 3) Flow для CHAT
 
-Source: `core/planner.py:22`, `core/planner.py:48`.
+Ключевой путь качества ответа находится в `apps/api/routes/runs.py`.
 
-Run execution lifecycle: `created -> running -> done/failed/canceled/paused` (`core/run_engine.py:56`, `core/run_engine.py:63`, `core/run_engine.py:79`, `core/run_engine.py:82`).
+1. Выбор intent:
+- `fast_chat_path` для коротких безопасных сообщений.
+- semantic decision через `IntentRouter.decide(...)`.
+- при сбое semantic — деградация в `semantic_resilience`.
 
-## API Surface (high level)
+2. Сохранение meta run:
+- intent-данные (`intent`, `intent_confidence`, `intent_path` и т.д.),
+- tone/memory интерпретация,
+- `runtime_metrics` (базовый объект метрик рантайма).
 
-Mounted routers: projects, runs, run_events, skills, artifacts, secrets, memory, reminders, auth (`apps/api/main.py:48`, `apps/api/main.py:56`).
+3. Эмит `intent_decided`:
+- включает выбранный путь и `decision_latency_ms`.
 
-Key endpoints:
+4. Генерация chat-ответа:
+- вызов LLM через `_call_chat_with_soft_retry(...)`,
+- при ошибке/пустом ответе — fallback (`chat_llm_fallback`),
+- при semantic resilience — degraded ответ.
 
-- projects: `apps/api/routes/projects.py:9`
-- runs + approvals: `apps/api/routes/runs.py:465`, `apps/api/routes/runs.py:939`
-- SSE: `apps/api/routes/run_events.py:15`
-- memory: `apps/api/routes/memory.py:11`
-- reminders: `apps/api/routes/reminders.py:12`
-- skills list/reload: `apps/api/routes/skills.py:7`
-- auth status/bootstrap: `apps/api/routes/auth.py:10`
+5. Auto web research:
+- решение принимает `_auto_web_research_decision(...)` (bool + reason),
+- при срабатывании запускается `skills/web_research/skill.py`,
+- собирается финальный текст и источники.
 
-## Desktop Bridge
+6. Финализация ответа:
+- во всех финальных ветках эмитится `chat_response_generated`,
+- в payload события добавляется `runtime_metrics`,
+- те же `runtime_metrics` пишутся в `run.meta.runtime_metrics`.
 
-Bridge is a local HTTP server started by Tauri with endpoints:
+## 4) Что пишется в runtime metrics
 
-- `/computer/preview`, `/computer/execute`
-- `/shell/preview`, `/shell/execute`
-- `/autopilot/capture`, `/autopilot/act`, `/autopilot/permissions`
+Текущее поле `runtime_metrics` содержит:
 
-Source: `apps/desktop/src-tauri/src/bridge.rs:111`, `apps/desktop/src-tauri/src/bridge.rs:127`.
+- `intent`
+- `intent_path`
+- `decision_latency_ms`
+- `response_latency_ms`
+- `auto_web_research_triggered`
+- `auto_web_research_reason`
+- `fallback_path`
 
-Default bind is loopback on port `43124` unless overridden by env (`apps/desktop/src-tauri/src/bridge.rs:104`, `apps/desktop/src-tauri/src/bridge.rs:107`).
+Это используется для диагностики качества и скорости без изменения API-контрактов событий.
 
-## Data and Storage
+## 5) Flow для ACT и ASK_CLARIFY
 
-- `ASTRA_BASE_DIR` / `ASTRA_DATA_DIR` define storage root (`apps/api/config.py:16`, `apps/api/config.py:17`).
-- DB file is `astra.db` in data dir (`memory/db.py:7`).
-- Migrations apply at startup (`memory/db.py:63`, `memory/db.py:66`).
+- `ACT`: строится план через engine/planner, далее исполняются шаги навыков.
+- `ASK_CLARIFY`: эмит `clarify_requested`, клиенту возвращаются уточняющие вопросы.
 
-## Auth and Transport Modes
+## 6) Event pipeline
 
-- Auth modes: `local`, `strict` (`apps/api/auth.py:17`).
-- `local`: loopback exempt from bearer token (`apps/api/auth.py:78`, `apps/api/auth.py:83`).
-- `strict`: token required (`apps/api/auth.py:104`).
-- LLM работает в local-only режиме через Ollama (`core/brain/router.py`).
+- События пишутся в SQLite через `memory/store.py`.
+- SSE endpoint: `GET /api/v1/runs/{run_id}/events` (`apps/api/routes/run_events.py`).
+- Экспорт событий: `GET /api/v1/runs/{run_id}/events/download` (NDJSON).
+- Полный снимок выполнения: `GET /api/v1/runs/{run_id}/snapshot`.
+
+## 7) Ключевые модули качества ответа
+
+- `apps/api/routes/runs.py`: intent routing, chat generation, fallback, auto web research, runtime metrics.
+- `core/intent_router.py`: semantic intent decision.
+- `core/brain/router.py`: маршрутизация и вызовы LLM/провайдера.
+- `skills/web_research/skill.py`: поиск и сборка фактов из веба.
+- `memory/store.py`: сохранение run meta/events для диагностики.

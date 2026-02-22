@@ -26,5 +26,6 @@ config/local.secrets.json
 config/*.secrets.json
 # Доноры (для справки, не участвуют в сборке)
 third_party/_donors/
+tmp/
 # OS
 .DS_Store

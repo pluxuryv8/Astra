@@ -75,6 +75,90 @@ class FakeUncertainChatBrain:
         )
 
 
+class FakeLeakyChatBrain:
+    def call(self, request, ctx=None):
+        return LLMResponse(
+            text=(
+                "<think>Сначала сделаю внутренний разбор.</think>\n"
+                "Internal reasoning:\n"
+                "- check context\n"
+                "Final answer: Кен Канеки - главный герой манги и аниме Tokyo Ghoul."
+            ),
+            usage=None,
+            provider="local",
+            model_id="fake",
+            latency_ms=1,
+            cache_hit=False,
+            route_reason="test",
+            status="ok",
+            error_type=None,
+        )
+
+
+class CapturingChatBrain:
+    def __init__(self, text: str = "Ок.") -> None:
+        self._text = text
+        self.last_request = None
+
+    def call(self, request, ctx=None):
+        self.last_request = request
+        return LLMResponse(
+            text=self._text,
+            usage=None,
+            provider="local",
+            model_id="fake",
+            latency_ms=1,
+            cache_hit=False,
+            route_reason="test",
+            status="ok",
+            error_type=None,
+        )
+
+
+class FakeVerboseChatBrain:
+    def call(self, request, ctx=None):
+        return LLMResponse(
+            text=(
+                "План на неделю: начни с умеренного дефицита калорий и ходьбы.\n\n"
+                "План на неделю: начни с умеренного дефицита калорий и ходьбы.\n\n"
+                "###!!!###\n"
+                "День 1: кардио 30 минут.\n"
+                "День 2: силовая тренировка на всё тело."
+            ),
+            usage=None,
+            provider="local",
+            model_id="fake",
+            latency_ms=1,
+            cache_hit=False,
+            route_reason="test",
+            status="ok",
+            error_type=None,
+        )
+
+
+class FakeTemplateThenGoodChatBrain:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def call(self, request, ctx=None):
+        self.calls += 1
+        if self.calls == 1:
+            text = "Вот универсальный шаблон ответа. Это зависит от контекста, уточните детали."
+        else:
+            text = "Кен Канеки - главный герой манги и аниме Tokyo Ghoul."
+        return LLMResponse(
+            text=text,
+            usage=None,
+            provider="local",
+            model_id="fake",
+            latency_ms=1,
+            cache_hit=False,
+            route_reason="test",
+            status="ok",
+            error_type=None,
+        )
+
+
 class FailingChatBrain:
     def call(self, request, ctx=None):  # noqa: ANN001, ANN002
         raise ProviderError(
@@ -196,7 +280,8 @@ def test_chat_run_saves_memory_item(monkeypatch, tmp_path: Path):
         headers=headers,
     )
     assert response.status_code == 200
-    assert response.json()["kind"] == "chat"
+    payload = response.json()
+    assert payload["kind"] == "chat"
 
     memory_items: list[dict] = []
     for _ in range(40):
@@ -207,6 +292,19 @@ def test_chat_run_saves_memory_item(monkeypatch, tmp_path: Path):
     assert len(memory_items) == 1
     assert any(item.get("content") == "Пользователь представился как Михаил." for item in memory_items)
     assert any((item.get("meta") or {}).get("facts") for item in memory_items)
+
+    run_snapshot = store.get_run(payload["run"]["id"])
+    runtime_metrics = (run_snapshot or {}).get("meta", {}).get("runtime_metrics", {})
+    assert runtime_metrics.get("intent") == "CHAT"
+    assert runtime_metrics.get("fallback_path") == "none"
+    assert runtime_metrics.get("chat_response_mode") == "direct_answer"
+    assert runtime_metrics.get("chat_response_mode_reason") == "simple_query"
+    assert isinstance(runtime_metrics.get("context_history_messages"), int)
+    assert isinstance(runtime_metrics.get("context_history_chars"), int)
+    assert isinstance(runtime_metrics.get("context_memory_items"), int)
+    assert isinstance(runtime_metrics.get("context_memory_chars"), int)
+    assert runtime_metrics.get("auto_web_research_triggered") is False
+    assert isinstance(runtime_metrics.get("response_latency_ms"), int)
 
 
 def test_chat_run_with_null_memory_item_does_not_write_memory(monkeypatch, tmp_path: Path):
@@ -331,6 +429,10 @@ def test_semantic_failure_degrades_to_chat_instead_of_502(monkeypatch, tmp_path:
     event_types = [item.get("type") for item in events]
     assert "llm_request_failed" in event_types
     assert "run_failed" not in event_types
+    chat_events = [item for item in events if item.get("type") == "chat_response_generated"]
+    assert chat_events
+    emitted_payload = chat_events[-1].get("payload") or {}
+    assert emitted_payload.get("reason_code") == "semantic_resilience_fallback"
 
 
 def test_chat_llm_timeout_degrades_to_fallback_chat(monkeypatch, tmp_path: Path):
@@ -360,11 +462,20 @@ def test_chat_llm_timeout_degrades_to_fallback_chat(monkeypatch, tmp_path: Path)
     payload = response.json()
     assert payload["kind"] == "chat"
     assert "Локальная модель сейчас недоступна" in payload["chat_response"]
+    assert "Текущий запрос: привет." in payload["chat_response"]
 
     events = store.list_events(payload["run"]["id"], limit=50)
     event_types = [item.get("type") for item in events]
     assert "chat_response_generated" in event_types
     assert "run_failed" not in event_types
+    chat_events = [item for item in events if item.get("type") == "chat_response_generated"]
+    assert chat_events
+    runtime_metrics = (chat_events[-1].get("payload") or {}).get("runtime_metrics") or {}
+    assert runtime_metrics.get("intent") == "CHAT"
+    assert runtime_metrics.get("fallback_path") in {"chat_llm_fallback", "chat_llm_fallback_web_research"}
+    assert isinstance(runtime_metrics.get("response_latency_ms"), int)
+    emitted_payload = chat_events[-1].get("payload") or {}
+    assert emitted_payload.get("reason_code") in {"chat_llm_fallback", "chat_llm_fallback_web_research"}
 
 
 def test_chat_uncertain_response_uses_auto_web_research(monkeypatch, tmp_path: Path):
@@ -431,12 +542,227 @@ def test_chat_uncertain_response_uses_auto_web_research(monkeypatch, tmp_path: P
     assert chat_events
     last_payload = chat_events[-1].get("payload") or {}
     assert last_payload.get("provider") == "web_research"
+    runtime_metrics = last_payload.get("runtime_metrics") or {}
+    assert runtime_metrics.get("auto_web_research_triggered") is True
+    assert runtime_metrics.get("auto_web_research_reason") in {"uncertain_response", "off_topic", "ru_language_mismatch"}
+    assert runtime_metrics.get("fallback_path") == "chat_web_research"
+    assert isinstance(runtime_metrics.get("response_latency_ms"), int)
+    run_snapshot = store.get_run(payload["run"]["id"])
+    persisted_metrics = (run_snapshot or {}).get("meta", {}).get("runtime_metrics", {})
+    assert persisted_metrics.get("fallback_path") == "chat_web_research"
+    assert persisted_metrics.get("auto_web_research_triggered") is True
     assert any(
         item.get("type") == "task_progress"
         and (item.get("payload") or {}).get("reason_code") == "search_round_started"
         and (item.get("payload") or {}).get("query") == "Кто такой Кен Канеки?"
         for item in events
     )
+
+
+def test_internal_reasoning_notes_are_not_exposed_in_chat_ui(monkeypatch, tmp_path: Path):
+    _init_store(tmp_path)
+    monkeypatch.setattr(runs_route, "get_brain", lambda: FakeLeakyChatBrain())
+    monkeypatch.setattr(
+        runs_route,
+        "interpret_user_message_for_memory",
+        lambda *args, **kwargs: _memory_interpretation(should_store=False),
+    )
+    monkeypatch.setattr(
+        intent_router,
+        "decide_semantic",
+        lambda *args, **kwargs: _semantic(intent="CHAT"),
+    )
+
+    client = TestClient(create_app())
+    headers = _bootstrap(client)
+    project = client.post("/api/v1/projects", json={"name": "semantic", "tags": [], "settings": {}}, headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={"query_text": "Кто такой Кен Канеки?", "mode": "plan_only"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "chat"
+    assert "Кен Канеки" in payload["chat_response"]
+    assert "<think>" not in payload["chat_response"]
+    assert "Internal reasoning" not in payload["chat_response"]
+    assert "Final answer" not in payload["chat_response"]
+
+    events = store.list_events(payload["run"]["id"], limit=60)
+    chat_events = [item for item in events if item.get("type") == "chat_response_generated"]
+    assert chat_events
+    emitted_text = str((chat_events[-1].get("payload") or {}).get("text") or "")
+    assert "<think>" not in emitted_text
+    assert "Internal reasoning" not in emitted_text
+
+
+def test_chat_final_postprocessor_adds_summary_and_removes_duplicates(monkeypatch, tmp_path: Path):
+    _init_store(tmp_path)
+    monkeypatch.setattr(runs_route, "get_brain", lambda: FakeVerboseChatBrain())
+    monkeypatch.setattr(
+        runs_route,
+        "interpret_user_message_for_memory",
+        lambda *args, **kwargs: _memory_interpretation(should_store=False),
+    )
+    monkeypatch.setattr(
+        intent_router,
+        "decide_semantic",
+        lambda *args, **kwargs: _semantic(intent="CHAT"),
+    )
+
+    client = TestClient(create_app())
+    headers = _bootstrap(client)
+    project = client.post("/api/v1/projects", json={"name": "semantic", "tags": [], "settings": {}}, headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={"query_text": "сделай план тренировок на неделю", "mode": "plan_only"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "chat"
+    assert payload["chat_response"].startswith("Краткий итог:")
+    assert "\n\nДетали:\n" in payload["chat_response"]
+    assert payload["chat_response"].count("План на неделю: начни с умеренного дефицита калорий и ходьбы.") == 1
+    assert "###!!!###" not in payload["chat_response"]
+
+    events = store.list_events(payload["run"]["id"], limit=60)
+    chat_events = [item for item in events if item.get("type") == "chat_response_generated"]
+    assert chat_events
+    emitted_text = str((chat_events[-1].get("payload") or {}).get("text") or "")
+    assert emitted_text.startswith("Краткий итог:")
+    assert "\n\nДетали:\n" in emitted_text
+    assert "###!!!###" not in emitted_text
+
+
+def test_template_like_chat_answer_is_regenerated_once(monkeypatch, tmp_path: Path):
+    _init_store(tmp_path)
+    brain = FakeTemplateThenGoodChatBrain()
+    monkeypatch.setattr(runs_route, "get_brain", lambda: brain)
+    monkeypatch.setattr(
+        runs_route,
+        "interpret_user_message_for_memory",
+        lambda *args, **kwargs: _memory_interpretation(should_store=False),
+    )
+    monkeypatch.setattr(
+        intent_router,
+        "decide_semantic",
+        lambda *args, **kwargs: _semantic(intent="CHAT"),
+    )
+
+    client = TestClient(create_app())
+    headers = _bootstrap(client)
+    project = client.post("/api/v1/projects", json={"name": "semantic", "tags": [], "settings": {}}, headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={"query_text": "Кто такой Кен Канеки?", "mode": "plan_only"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "chat"
+    assert "Кен Канеки" in payload["chat_response"]
+    assert "универсальный шаблон" not in payload["chat_response"].lower()
+    assert brain.calls == 2
+
+    events = store.list_events(payload["run"]["id"], limit=60)
+    chat_events = [item for item in events if item.get("type") == "chat_response_generated"]
+    assert chat_events
+    emitted_text = str((chat_events[-1].get("payload") or {}).get("text") or "")
+    assert "универсальный шаблон" not in emitted_text.lower()
+
+
+def test_complex_chat_query_switches_to_step_by_step_response_mode(monkeypatch, tmp_path: Path):
+    _init_store(tmp_path)
+    brain = CapturingChatBrain("Сначала делай разминку. Потом основная тренировка.")
+    monkeypatch.setattr(runs_route, "get_brain", lambda: brain)
+    monkeypatch.setattr(
+        runs_route,
+        "interpret_user_message_for_memory",
+        lambda *args, **kwargs: _memory_interpretation(should_store=False),
+    )
+    monkeypatch.setattr(
+        intent_router,
+        "decide_semantic",
+        lambda *args, **kwargs: _semantic(intent="CHAT"),
+    )
+
+    client = TestClient(create_app())
+    headers = _bootstrap(client)
+    project = client.post("/api/v1/projects", json={"name": "semantic", "tags": [], "settings": {}}, headers=headers).json()
+
+    query = "Составь подробный план тренировок на месяц с этапами, рисками и метриками прогресса"
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={"query_text": query, "mode": "plan_only"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "chat"
+    assert payload["run"]["meta"]["chat_response_mode"] == "step_by_step_plan"
+    assert "complex_keyword" in str(payload["run"]["meta"]["chat_response_mode_reason"] or "")
+
+    assert brain.last_request is not None
+    system_prompt = str((brain.last_request.messages or [{}])[0].get("content") or "")
+    assert "Формат ответа: step-by-step plan." in system_prompt
+    assert brain.last_request.max_tokens > runs_route._chat_num_predict_default()
+    assert brain.last_request.temperature < runs_route._chat_temperature_default()
+    assert (brain.last_request.metadata or {}).get("chat_inference_profile") == "complex"
+
+    run_snapshot = store.get_run(payload["run"]["id"])
+    runtime_metrics = (run_snapshot or {}).get("meta", {}).get("runtime_metrics", {})
+    assert runtime_metrics.get("chat_response_mode") == "step_by_step_plan"
+    assert runtime_metrics.get("chat_inference_profile") == "complex"
+
+    events = store.list_events(payload["run"]["id"], limit=60)
+    chat_events = [item for item in events if item.get("type") == "chat_response_generated"]
+    assert chat_events
+    emitted_payload = chat_events[-1].get("payload") or {}
+    assert emitted_payload.get("response_mode") == "step_by_step_plan"
+
+
+def test_simple_chat_query_uses_fast_inference_profile(monkeypatch, tmp_path: Path):
+    _init_store(tmp_path)
+    brain = CapturingChatBrain("4")
+    monkeypatch.setattr(runs_route, "get_brain", lambda: brain)
+    monkeypatch.setattr(
+        runs_route,
+        "interpret_user_message_for_memory",
+        lambda *args, **kwargs: _memory_interpretation(should_store=False),
+    )
+    monkeypatch.setattr(
+        intent_router,
+        "decide_semantic",
+        lambda *args, **kwargs: _semantic(intent="CHAT"),
+    )
+
+    client = TestClient(create_app())
+    headers = _bootstrap(client)
+    project = client.post("/api/v1/projects", json={"name": "semantic", "tags": [], "settings": {}}, headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={"query_text": "2+2?", "mode": "plan_only"},
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "chat"
+
+    assert brain.last_request is not None
+    assert brain.last_request.max_tokens < runs_route._chat_num_predict_default()
+    assert brain.last_request.temperature < runs_route._chat_temperature_default()
+    assert (brain.last_request.metadata or {}).get("chat_inference_profile") == "fast"
+
+    run_snapshot = store.get_run(payload["run"]["id"])
+    runtime_metrics = (run_snapshot or {}).get("meta", {}).get("runtime_metrics", {})
+    assert runtime_metrics.get("chat_response_mode") == "direct_answer"
+    assert runtime_metrics.get("chat_inference_profile") == "fast"
 
 
 def test_fast_chat_path_skips_semantic_and_memory_interpreter(monkeypatch, tmp_path: Path):
@@ -467,6 +793,55 @@ def test_fast_chat_path_skips_semantic_and_memory_interpreter(monkeypatch, tmp_p
     assert payload["kind"] == "chat"
     assert payload["run"]["meta"]["intent_path"] == "fast_chat_path"
     assert payload["run"]["meta"]["memory_interpretation_error"] == "memory_interpreter_skipped_fast_path"
+
+
+def test_fast_chat_boundary_simple_vs_complex(monkeypatch):
+    monkeypatch.setenv("ASTRA_CHAT_FAST_PATH_ENABLED", "true")
+    assert runs_route._is_fast_chat_candidate("214 + 43241", qa_mode=False) is True
+    assert (
+        runs_route._is_fast_chat_candidate(
+            "Составь подробный план тренировок на месяц с этапами, рисками и метриками прогресса",
+            qa_mode=False,
+        )
+        is False
+    )
+
+
+def test_complex_chat_request_skips_fast_path_and_uses_semantic(monkeypatch, tmp_path: Path):
+    _init_store(tmp_path)
+    monkeypatch.setenv("ASTRA_CHAT_FAST_PATH_ENABLED", "true")
+    monkeypatch.setattr(runs_route, "get_brain", lambda: FakeChatBrain())
+    monkeypatch.setattr(
+        runs_route,
+        "interpret_user_message_for_memory",
+        lambda *args, **kwargs: _memory_interpretation(should_store=False),
+    )
+    called = {"semantic": 0}
+
+    def _semantic_called(*args, **kwargs):  # noqa: ANN002, ANN003
+        called["semantic"] += 1
+        return _semantic(intent="CHAT")
+
+    monkeypatch.setattr(intent_router, "decide_semantic", _semantic_called)
+
+    client = TestClient(create_app())
+    headers = _bootstrap(client)
+    project = client.post("/api/v1/projects", json={"name": "semantic", "tags": [], "settings": {}}, headers=headers).json()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/runs",
+        json={
+            "query_text": "Составь подробный план тренировок на месяц с этапами, рисками и метриками прогресса",
+            "mode": "plan_only",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["kind"] == "chat"
+    assert payload["run"]["meta"]["intent_path"] == "semantic"
+    assert payload["run"]["meta"]["memory_interpretation_error"] is None
+    assert called["semantic"] == 1
 
 
 def test_memory_save_failure_is_non_blocking(monkeypatch, tmp_path: Path):

@@ -1,5 +1,16 @@
 # Development Workflow
 
+## Python env
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -r requirements-dev.txt
+```
+
+`requirements-dev.txt` now includes runtime API deps via `-r apps/api/requirements.txt`, so one install command is enough for local tests/dev.
+
 ## Local run
 
 ```bash
@@ -19,10 +30,77 @@ Sources: `scripts/astra:266`, `scripts/astra:148`, `scripts/run.sh:128`, `script
 
 Sources: `scripts/astra:270`, `scripts/astra:276`, `scripts/astra:245`, `scripts/astra:248`.
 
-## Quality gates
+## Tests
+
+Fast local check (lighter CPU):
 
 ```bash
-python3 -m pytest -q
+pytest -q --ignore=tests/test_smoke.py --ignore=tests/test_contracts.py
+```
+
+Targeted regressions:
+
+```bash
+pytest -q tests/test_brain_regressions.py
+```
+
+Full suite:
+
+```bash
+pytest -q
+```
+
+## Quality gate
+
+Базовый gate для quality/latency (Phase 1):
+
+1. Intent gate
+
+```bash
+PYTHONPATH=. pytest -q tests/test_intent_router.py tests/test_semantic_routing.py
+```
+
+Критерий: все тесты зелёные (`25 passed` в текущем baseline).
+
+2. Brain quality gate
+
+```bash
+PYTHONPATH=. pytest -q tests/test_brain_regressions.py tests/test_golden_complex_chat_cases.py
+```
+
+Критерий: нет новых падений по регрессиям и golden-кейсам.  
+Допускается только известный `xfail` по planner default-path (до отдельного фикса).
+
+3. Chat latency gate (p50/p95 report)
+
+```bash
+PYTHONPATH=. pytest -q -s tests/test_latency_chat_path.py
+```
+
+Критерий: тест печатает p50/p95 и остаётся в порогах (по умолчанию):
+
+- `short p95 <= 700ms`
+- `medium p95 <= 950ms`
+- `complex p95 <= 1400ms`
+
+Пороги можно переопределить через:
+
+- `ASTRA_TEST_CHAT_LATENCY_SAMPLES`
+- `ASTRA_TEST_CHAT_LATENCY_SHORT_P95_MS`
+- `ASTRA_TEST_CHAT_LATENCY_MEDIUM_P95_MS`
+- `ASTRA_TEST_CHAT_LATENCY_COMPLEX_P95_MS`
+
+4. Full suite gate
+
+```bash
+pytest -q
+```
+
+Критерий: без новых падений относительно текущего baseline.
+
+Дополнительный gate для desktop/infra:
+
+```bash
 npm --prefix apps/desktop run test
 npm --prefix apps/desktop run lint
 ./scripts/doctor.sh prereq

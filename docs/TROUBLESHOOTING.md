@@ -1,120 +1,128 @@
 # Troubleshooting
 
-## 1) UI error: `Missing VITE_ASTRA_API_BASE_URL` or `Missing VITE_ASTRA_BRIDGE_BASE_URL`
+Документ сфокусирован на двух главных симптомах качества:
 
-Причина: frontend ожидает явные `VITE_ASTRA_*` адреса или runtime config (`apps/desktop/src/shared/api/config.ts:45`, `apps/desktop/src/shared/api/config.ts:53`).
+- мусорный/грязный/нерелевантный ответ;
+- слишком долгий ответ.
 
-Проверка и исправление:
+## 1) Симптом: мусорный или нерелевантный ответ
+
+### Что проверить первым
+
+1. `runtime_metrics` у run:
 
 ```bash
-./scripts/doctor.sh prereq
-python scripts/diag_addresses.py
+API=http://127.0.0.1:8055/api/v1
+RUN_ID=<run_id>
+
+curl -sS "$API/runs/$RUN_ID" | jq '.meta.runtime_metrics'
 ```
 
-Скрипт запуска обычно сам синхронизирует адреса (`scripts/lib/address_config.sh:155`, `scripts/lib/address_config.sh:156`).
+2. Последние события `chat_response_generated` и `llm_request_failed`:
 
-## 2) `Address mismatch` при старте
+```bash
+curl -sS "$API/runs/$RUN_ID/events/download" \
+  | jq -c 'select(.type=="chat_response_generated" or .type=="llm_request_failed")'
+```
 
-Причина: конфликт между `ASTRA_*` и `VITE_*` переменными.
+### Как читать `runtime_metrics`
 
-Источник проверки: `scripts/lib/address_config.sh:146`, `scripts/lib/address_config.sh:150`.
+- `fallback_path=semantic_resilience`:
+  semantic-слой упал, ответ уже деградированный.
+- `fallback_path=chat_llm_fallback`:
+  chat LLM не дала нормальный результат, вернулся fallback-текст.
+- `fallback_path=chat_web_research` или `chat_llm_fallback_web_research`:
+  включился auto web research; проверяй глубину и лимиты web-поиска.
+- `auto_web_research_triggered=true` + `auto_web_research_reason`:
+  видно, почему авто-поиск сработал (`uncertain_response`, `off_topic`, `ru_language_mismatch`, `llm_error:*`, `empty_response`).
 
-Исправление:
+### Частые причины и фиксы
 
-- оставить только `ASTRA_API_BASE_URL` и `ASTRA_BRIDGE_BASE_URL` в `.env`;
-- убрать вручную заданные конфликтующие `VITE_ASTRA_*`;
-- перезапустить `./scripts/astra dev`.
+- LLM недоступна/нестабильна:
 
-## 3) `doctor prereq`: `Ollama not reachable`
+```bash
+curl -sS http://127.0.0.1:11434/api/tags
+```
 
-Проверка делается по `GET /api/tags` (`scripts/doctor.sh:108`, `scripts/doctor.sh:113`).
+- Слишком агрессивный/долгий web research:
+  уменьшить `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_ROUNDS`, `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_PAGES`, `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_SOURCES`.
 
-Команды:
+- Маршрутизация неудачно выбрала path:
+  временно включить QA-режим для диагностики:
+
+```bash
+export ASTRA_QA_MODE=true
+```
+
+## 2) Симптом: ответ слишком долгий
+
+### Быстрая диагностика
+
+1. Смотри общую latency в runtime метриках:
+
+```bash
+curl -sS "$API/runs/$RUN_ID" | jq '.meta.runtime_metrics'
+```
+
+2. Смотри latency конкретного финального события:
+
+```bash
+curl -sS "$API/runs/$RUN_ID/events/download" \
+  | jq -c 'select(.type=="chat_response_generated") | .payload | {provider, latency_ms, runtime_metrics}'
+```
+
+### Интерпретация
+
+- `response_latency_ms` высокая и `auto_web_research_triggered=true`:
+  тормозит web research, это ожидаемо.
+- `response_latency_ms` высокая и `fallback_path=chat_llm_fallback`:
+  были проблемы LLM + fallback.
+- `decision_latency_ms` непропорционально высокая:
+  нужно проверить нагрузку semantic/LLM path.
+
+### Что крутить сначала
+
+1. Уменьшить web research лимиты:
+- `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_ROUNDS`
+- `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_PAGES`
+- `ASTRA_CHAT_AUTO_WEB_RESEARCH_MAX_SOURCES`
+
+2. Проверить таймауты и модельный роутер:
+- `ASTRA_LLM_LOCAL_TIMEOUT_S`
+- `ASTRA_LLM_CHAT_TIER_TIMEOUT_S`
+- `ASTRA_LLM_MAX_CONCURRENCY`
+
+3. Проверить fast path:
+- `ASTRA_CHAT_FAST_PATH_ENABLED=true`
+- `ASTRA_CHAT_FAST_PATH_MAX_CHARS` (не занижать слишком сильно)
+
+## 3) Инфра-проблемы, которые маскируются под “плохой ответ”
+
+### `Ollama not reachable`
 
 ```bash
 curl -sS http://127.0.0.1:11434/api/tags
 ./scripts/models.sh verify
-./scripts/models.sh install
 ```
 
-## 4) `401` / `invalid_token`
-
-Поведение auth:
-
-- `local`: loopback без bearer допускается (`apps/api/auth.py:78`, `apps/api/auth.py:83`);
-- `strict`: токен обязателен (`apps/api/auth.py:104`).
-
-Проверка:
+### `401` / `invalid_token`
 
 ```bash
 curl -i http://127.0.0.1:8055/api/v1/auth/status
 ```
 
-Bootstrap токена:
+### SSE не стримит события
 
 ```bash
-curl -X POST http://127.0.0.1:8055/api/v1/auth/bootstrap \
-  -H 'Content-Type: application/json' \
-  -d '{"token":"<your_token>"}'
+curl -N "http://127.0.0.1:8055/api/v1/runs/$RUN_ID/events?once=1"
 ```
 
-## 5) `doctor runtime` иногда падает на `POST /projects/{id}/runs`, но API жив
-
-В `scripts/doctor.sh` JSON из shell подставляется в Python через тройные кавычки (`scripts/doctor.sh:343`).
-Если в ответе есть экранированные кавычки, парсинг может дать ложный `FAIL`.
-
-Проверка вручную:
-
-```bash
-# создать проект
-curl -sS -X POST http://127.0.0.1:8055/api/v1/projects \
-  -H 'Content-Type: application/json' \
-  -d '{"name":"doctor-debug","tags":["doctor"],"settings":{}}'
-
-# создать run
-curl -sS -X POST http://127.0.0.1:8055/api/v1/projects/<project_id>/runs \
-  -H 'Content-Type: application/json' \
-  -d '{"query_text":"doctor smoke","mode":"plan_only"}'
-```
-
-Если второй запрос возвращает `200` и `run.id`, это ложный провал doctor-шага.
-
-## 6) Reminders не доставляются в Telegram
-
-Факты:
-
-- default delivery -> `telegram`, только когда заданы `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID` (`apps/api/routes/reminders.py:16`, `apps/api/routes/reminders.py:18`);
-- иначе fallback `local` (`apps/api/routes/reminders.py:20`);
-- scheduler можно выключить `ASTRA_REMINDERS_ENABLED=false` (`core/reminders/scheduler.py:135`).
-
-Проверки:
-
-```bash
-printenv TELEGRAM_BOT_TOKEN
-printenv TELEGRAM_CHAT_ID
-curl -sS http://127.0.0.1:8055/api/v1/reminders
-```
-
-## 7) Bridge `503 НЕДОСТУПНО` на `/computer/*` или `/autopilot/*`
-
-Bridge отвечает `503`, если desktop функциональность не инициализирована (`apps/desktop/src-tauri/src/bridge.rs:200`, `apps/desktop/src-tauri/src/bridge.rs:227`).
-
-Проверки:
-
-```bash
-./scripts/astra status
-curl -sS http://127.0.0.1:43124/autopilot/permissions
-```
-
-Убедитесь, что desktop запущен через `npm --prefix apps/desktop run tauri dev` (или `./scripts/astra dev`).
-
-## 8) Быстрый набор команд диагностики
+## 4) Минимальный набор команд диагностики
 
 ```bash
 ./scripts/astra status
 ./scripts/doctor.sh prereq
 ./scripts/doctor.sh runtime
-python scripts/diag_addresses.py
 ./scripts/astra logs api
 ./scripts/astra logs desktop
 ```

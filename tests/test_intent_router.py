@@ -118,3 +118,21 @@ def test_qa_mode_bypasses_semantic():
 
     assert decision.intent == INTENT_ACT
     assert decision.decision_path == "qa_mode"
+
+
+def test_chat_to_act_guard_for_low_confidence_action_like_query(monkeypatch):
+    monkeypatch.setattr(
+        intent_router,
+        "decide_semantic",
+        lambda *args, **kwargs: _semantic(intent=INTENT_CHAT, confidence=0.3, plan_hint=[]),
+    )
+
+    router = IntentRouter(qa_mode=False)
+    decision = router.decide("открой браузер и найди последние новости по рынку")
+
+    assert decision.intent == INTENT_ACT
+    assert decision.decision_path == "semantic_action_guard"
+    assert decision.plan_hint == ["COMPUTER_ACTIONS"]
+    assert decision.act_hint is not None
+    assert decision.act_hint.target == "COMPUTER"
+    assert "chat_to_act_guard" in decision.reasons

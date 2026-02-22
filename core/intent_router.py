@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -30,6 +31,16 @@ _COMPUTER_PLAN_KINDS = {
     "CODE_ASSIST",
     "SMOKE_RUN",
 }
+
+_ACTION_REQUEST_HINT_RE = re.compile(
+    r"\b("
+    r"открой|запусти|выполни|сделай|создай|удали|очисти|перенеси|"
+    r"перейди|нажми|кликни|напомни|отправь|опубликуй|deploy|terminal|"
+    r"browser|файл|папк\w+|команд\w+\s+строк\w+|shell"
+    r")\b",
+    flags=re.IGNORECASE,
+)
+_CHAT_TO_ACT_CONFIDENCE_GUARD = 0.55
 
 
 @dataclass
@@ -131,6 +142,29 @@ class IntentRouter:
             reasons.append("plan_hint")
         if memory_item:
             reasons.append("memory_item")
+
+        if (
+            semantic.intent == INTENT_CHAT
+            and semantic.confidence <= _CHAT_TO_ACT_CONFIDENCE_GUARD
+            and _ACTION_REQUEST_HINT_RE.search(raw_text)
+        ):
+            plan_hint = list(semantic.plan_hint or ["COMPUTER_ACTIONS"])
+            danger_flags = self._detect_danger_flags(raw_text)
+            target = TARGET_COMPUTER if any(kind in _COMPUTER_PLAN_KINDS for kind in plan_hint) else TARGET_TEXT_ONLY
+            suggested_run_mode = "execute_confirm" if target == TARGET_TEXT_ONLY or danger_flags else "autopilot_safe"
+            return IntentDecision(
+                intent=INTENT_ACT,
+                confidence=max(semantic.confidence, _CHAT_TO_ACT_CONFIDENCE_GUARD),
+                reasons=["semantic_decision", "chat_to_act_guard"],
+                questions=[],
+                needs_clarification=False,
+                act_hint=ActHint(target=target, danger_flags=danger_flags, suggested_run_mode=suggested_run_mode),
+                plan_hint=plan_hint,
+                memory_item=memory_item,
+                response_style_hint=semantic.response_style_hint,
+                user_visible_note=semantic.user_visible_note,
+                decision_path="semantic_action_guard",
+            )
 
         return IntentDecision(
             intent=semantic.intent,
