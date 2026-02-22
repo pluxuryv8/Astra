@@ -18,6 +18,7 @@ from apps.api.auth import require_auth
 from apps.api.models import ApprovalDecisionRequest, RunCreate
 from core.agent import (
     analyze_tone,
+    build_explicit_style_memory_payload,
     build_dynamic_prompt as build_agent_dynamic_prompt,
     build_tone_profile_memory_payload,
     merge_memory_payloads,
@@ -27,6 +28,7 @@ from core.brain.types import LLMRequest
 from core.chat_context import (
     build_chat_messages,
     build_user_profile_context,
+    style_hint_from_preference,
 )
 from core.event_bus import emit
 from core.intent_router import INTENT_ACT, INTENT_ASK, INTENT_CHAT, IntentDecision, IntentRouter
@@ -764,18 +766,9 @@ def _style_hint_from_interpretation(memory_interpretation: dict[str, Any] | None
         value = item.get("value")
         if not isinstance(key, str) or not isinstance(value, str):
             continue
-        key = key.strip().lower()
-        value = value.strip()
-        if not value:
-            continue
-        if key == "style.brevity" and value.lower() in {"short", "brief", "compact"}:
-            hints.append("Отвечай коротко и по делу.")
-        elif key == "style.tone":
-            hints.append(f"Тон ответа: {value}.")
-        elif key == "user.addressing.preference":
-            hints.append(f"Формат обращения к пользователю: {value}.")
-        elif key == "response.format":
-            hints.append(f"Формат ответа: {value}.")
+        hint = style_hint_from_preference(key, value)
+        if hint:
+            hints.append(hint)
     unique = []
     for hint in hints:
         if hint not in unique:
@@ -2027,6 +2020,8 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
     if memory_payload is None and bool((tone_analysis or {}).get("self_improve")):
         tone_memory_payload = build_tone_profile_memory_payload(payload.query_text, tone_analysis, profile_memories)
     memory_payload = merge_memory_payloads(memory_payload, tone_memory_payload)
+    explicit_style_memory_payload = build_explicit_style_memory_payload(payload.query_text, profile_memories)
+    memory_payload = merge_memory_payloads(memory_payload, explicit_style_memory_payload)
 
     selected_mode = "plan_only"
     selected_purpose = payload.purpose

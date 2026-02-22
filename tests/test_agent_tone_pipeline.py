@@ -8,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 
 from core.agent import (
     analyze_tone,
+    build_explicit_style_memory_payload,
     build_chat_system_prompt,
     build_tone_profile_memory_payload,
     load_persona_modules,
@@ -96,6 +97,37 @@ def test_tone_memory_payload_merges_into_existing_payload():
     assert merged is not None
     assert any(item.get("key") == "user.name" for item in merged["memory_payload"]["facts"])
     assert any(item.get("key") == "style.tone" for item in merged["memory_payload"]["preferences"])
+
+
+def test_explicit_style_memory_payload_detects_tone_and_brevity():
+    payload = build_explicit_style_memory_payload(
+        "Отвечай более строго и кратко, без воды.",
+        [],
+    )
+    assert payload is not None
+    preferences = payload["memory_payload"]["preferences"]
+    assert any(item.get("key") == "style.tone" and item.get("value") == "strict" for item in preferences)
+    assert any(item.get("key") == "style.brevity" and item.get("value") == "short" for item in preferences)
+
+
+def test_explicit_style_memory_payload_respects_existing_preferences():
+    memories = [
+        {
+            "meta": {
+                "preferences": [
+                    {"key": "style.tone", "value": "strict", "confidence": 0.92},
+                ]
+            }
+        }
+    ]
+    payload = build_explicit_style_memory_payload(
+        "Отвечай более строго и кратко, без воды.",
+        memories,
+    )
+    assert payload is not None
+    preferences = payload["memory_payload"]["preferences"]
+    assert not any(item.get("key") == "style.tone" and item.get("value") == "strict" for item in preferences)
+    assert any(item.get("key") == "style.brevity" and item.get("value") == "short" for item in preferences)
 
 
 def test_persona_prompt_modules_share_style_contract():

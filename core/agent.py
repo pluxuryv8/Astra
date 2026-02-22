@@ -147,6 +147,40 @@ _SELF_IMPROVE_TOKENS = (
 )
 
 _WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё0-9_+-]+")
+_EXPLICIT_STYLE_STRICT_RE = re.compile(
+    r"\b("
+    r"(?:отвечай|пиши|будь|говори|сделай|давай|хочу|предпочитаю|нужен|нужна|нужно|можешь)\b[^.!?\n]{0,40}\b(?:строг\w*|формальн\w*|официальн\w*|делов\w*|сух\w*)"
+    r"|(?:строг\w*|формальн\w*|официальн\w*|делов\w*|сух\w*)\s+(?:тон|стиль)"
+    r")",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_STYLE_STRICT_NEG_RE = re.compile(
+    r"\bне\s+(?:слишком\s+)?(?:строг\w*|формальн\w*|официальн\w*|делов\w*|сух\w*)\b",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_STYLE_FRIENDLY_RE = re.compile(
+    r"\b("
+    r"(?:отвечай|пиши|будь|говори|сделай|давай|хочу|предпочитаю|нужен|нужна|нужно|можешь)\b[^.!?\n]{0,40}\b(?:дружелюб\w*|дружествен\w*|по[- ]дружеск\w*|тепл\w*|мягк\w*|поддержива\w*)"
+    r"|(?:дружелюб\w*|дружествен\w*|по[- ]дружеск\w*|тепл\w*|мягк\w*|поддержива\w*)\s+(?:тон|стиль)"
+    r")",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_STYLE_FRIENDLY_NEG_RE = re.compile(
+    r"\bне\s+(?:слишком\s+)?(?:дружелюб\w*|мягк\w*|тепл\w*)\b",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_STYLE_BREVITY_RE = re.compile(
+    r"\b("
+    r"(?:отвечай|пиши|сделай|давай|хочу|предпочитаю|нужен|нужна|нужно|можешь)\b[^.!?\n]{0,40}\b(?:кратк\w*|коротк\w*|сжат\w*)"
+    r"|(?:без\s+воды|по\s+делу|в\s+двух\s+словах)"
+    r"|(?:кратк\w*|коротк\w*|сжат\w*)\s+(?:ответ|формат|стиль)"
+    r")",
+    flags=re.IGNORECASE,
+)
+_EXPLICIT_STYLE_BREVITY_NEG_RE = re.compile(
+    r"\bне\s+(?:слишком\s+)?(?:кратк\w*|коротк\w*|сжат\w*)\b|\bне\s+надо\s+(?:кратк\w*|коротк\w*|по\s+делу|без\s+воды)",
+    flags=re.IGNORECASE,
+)
 
 
 def _read_prompt_file(filename: str) -> str:
@@ -965,6 +999,63 @@ def _tone_preference_candidates(tone_analysis: dict[str, Any]) -> list[dict[str,
     return candidates
 
 
+def _last_match_start(pattern: re.Pattern[str], text: str) -> int | None:
+    last_pos: int | None = None
+    for match in pattern.finditer(text):
+        last_pos = match.start()
+    return last_pos
+
+
+def _explicit_style_preference_candidates(user_msg: str) -> list[dict[str, Any]]:
+    text = _normalized_text(user_msg)
+    if not text:
+        return []
+
+    strict_pos = None
+    if not _EXPLICIT_STYLE_STRICT_NEG_RE.search(text):
+        strict_pos = _last_match_start(_EXPLICIT_STYLE_STRICT_RE, text)
+
+    friendly_pos = None
+    if not _EXPLICIT_STYLE_FRIENDLY_NEG_RE.search(text):
+        friendly_pos = _last_match_start(_EXPLICIT_STYLE_FRIENDLY_RE, text)
+
+    brevity_match = None
+    if not _EXPLICIT_STYLE_BREVITY_NEG_RE.search(text):
+        brevity_match = _last_match_start(_EXPLICIT_STYLE_BREVITY_RE, text)
+
+    candidates: list[dict[str, Any]] = []
+    if strict_pos is not None or friendly_pos is not None:
+        if strict_pos is not None and (friendly_pos is None or strict_pos >= friendly_pos):
+            candidates.append(
+                {
+                    "key": "style.tone",
+                    "value": "strict",
+                    "confidence": 0.92,
+                    "summary": "Пользователь явно попросил строгий и точный стиль ответа.",
+                }
+            )
+        else:
+            candidates.append(
+                {
+                    "key": "style.tone",
+                    "value": "friendly",
+                    "confidence": 0.92,
+                    "summary": "Пользователь явно попросил дружелюбный стиль ответа.",
+                }
+            )
+
+    if brevity_match is not None:
+        candidates.append(
+            {
+                "key": "style.brevity",
+                "value": "short",
+                "confidence": 0.9,
+                "summary": "Пользователь явно попросил краткие ответы без лишнего текста.",
+            }
+        )
+    return candidates
+
+
 def _safe_evidence(user_msg: str, *, limit: int = 220) -> str:
     text = (user_msg or "").strip()
     if not text:
@@ -972,6 +1063,32 @@ def _safe_evidence(user_msg: str, *, limit: int = 220) -> str:
     if len(text) <= limit:
         return text
     return text[:limit].rstrip()
+
+
+def build_explicit_style_memory_payload(
+    user_msg: str,
+    memories: list[dict],
+) -> dict[str, Any] | None:
+    candidates = _explicit_style_preference_candidates(user_msg)
+    if not candidates:
+        return None
+
+    existing_pairs = _profile_preference_pairs(memories)
+    preferences, summaries = _prepare_preferences(user_msg, candidates, existing_pairs)
+    if not preferences:
+        return None
+
+    summary = " ".join(dict.fromkeys(summaries))
+    if not summary:
+        summary = "Обновлены явные предпочтения стиля пользователя."
+
+    return _build_auto_memory_payload(
+        user_msg,
+        title="Профиль стиля пользователя",
+        summary=summary,
+        confidence=max(item["confidence"] for item in preferences),
+        preferences=preferences,
+    )
 
 
 def _build_auto_memory_payload(

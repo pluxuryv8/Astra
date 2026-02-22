@@ -2,6 +2,43 @@ from __future__ import annotations
 
 import re
 
+_SHORT_BREVITY_VALUES = {
+    "short",
+    "brief",
+    "compact",
+    "кратко",
+    "коротко",
+    "сжато",
+}
+_STRICT_TONE_VALUES = {
+    "strict",
+    "formal",
+    "business",
+    "строго",
+    "строгий",
+    "формально",
+    "формальный",
+    "деловой",
+    "официальный",
+    "официально",
+    "сухой",
+    "сухо",
+}
+_FRIENDLY_TONE_VALUES = {
+    "friendly",
+    "warm",
+    "casual",
+    "дружелюбно",
+    "дружелюбный",
+    "дружественно",
+    "тепло",
+    "мягко",
+    "по-дружески",
+}
+_SUPPORTIVE_DIRECT_TONE_VALUES = {"supportive-direct"}
+_CALM_SUPPORTIVE_TONE_VALUES = {"calm-supportive"}
+_ENERGETIC_DIRECT_TONE_VALUES = {"energetic-direct"}
+
 
 def _memory_meta(item: dict) -> dict:
     meta = item.get("meta")
@@ -50,6 +87,47 @@ def _extract_name_from_memories(memories: list[dict]) -> str | None:
     return None
 
 
+def style_hint_from_preference(key: str, value: str) -> str | None:
+    key_norm = key.strip().lower()
+    value_clean = value.strip()
+    value_norm = re.sub(r"\s+", " ", value_clean.lower().replace("ё", "е"))
+    if not value_clean:
+        return None
+
+    if key_norm == "style.brevity":
+        if value_norm in _SHORT_BREVITY_VALUES:
+            return "Отвечай коротко и по делу."
+        return f"Уровень краткости: {value_clean}."
+
+    if key_norm == "style.tone":
+        if value_norm in _STRICT_TONE_VALUES:
+            return "Стиль: строгий и точный, без лишней разговорности."
+        if value_norm in _FRIENDLY_TONE_VALUES:
+            return "Стиль: дружелюбный и поддерживающий."
+        if value_norm in _SUPPORTIVE_DIRECT_TONE_VALUES:
+            return "Тон ответа: поддерживающий и прямой."
+        if value_norm in _CALM_SUPPORTIVE_TONE_VALUES:
+            return "Тон ответа: спокойный и поддерживающий."
+        if value_norm in _ENERGETIC_DIRECT_TONE_VALUES:
+            return "Тон ответа: энергичный и прямой."
+        return f"Тон ответа: {value_clean}."
+
+    if key_norm == "style.mirror_level" and value_norm in {"low", "medium", "high"}:
+        if value_norm == "low":
+            return "Зеркалинг минимальный: акцент на точность."
+        if value_norm == "high":
+            return "Зеркалинг высокий: адаптируй ритм и лексику."
+        return "Зеркалинг умеренный: деловой и человечный баланс."
+
+    if key_norm == "user.addressing.preference":
+        return f"Формат обращения к пользователю: {value_clean}."
+
+    if key_norm == "response.format":
+        return f"Формат ответа: {value_clean}."
+
+    return None
+
+
 def _style_hints_from_memories(memories: list[dict], limit: int = 4) -> list[str]:
     hints: list[str] = []
     seen: set[str] = set()
@@ -65,27 +143,8 @@ def _style_hints_from_memories(memories: list[dict], limit: int = 4) -> list[str
             value = pref.get("value")
             if not isinstance(key, str) or not isinstance(value, str):
                 continue
-            key = key.strip().lower()
-            value = value.strip()
-            if not value:
-                continue
-
-            if key == "style.brevity" and value.lower() in {"short", "brief", "compact"}:
-                hint = "Отвечай коротко и по делу."
-            elif key == "style.tone":
-                hint = f"Тон ответа: {value}."
-            elif key == "style.mirror_level" and value.lower() in {"low", "medium", "high"}:
-                if value.lower() == "low":
-                    hint = "Зеркалинг минимальный: акцент на точность."
-                elif value.lower() == "high":
-                    hint = "Зеркалинг высокий: адаптируй ритм и лексику."
-                else:
-                    hint = "Зеркалинг умеренный: деловой и человечный баланс."
-            elif key == "user.addressing.preference":
-                hint = f"Формат обращения к пользователю: {value}."
-            elif key == "response.format":
-                hint = f"Формат ответа: {value}."
-            else:
+            hint = style_hint_from_preference(key, value)
+            if not hint:
                 continue
 
             if hint in seen:

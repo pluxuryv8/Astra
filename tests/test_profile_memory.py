@@ -87,6 +87,42 @@ def test_chat_system_prompt_uses_name_and_style_from_profile(tmp_path: Path):
     assert "Отвечай коротко и по делу." in prompt
 
 
+def test_chat_system_prompt_maps_strict_tone_preference_from_profile(tmp_path: Path):
+    _init_store(tmp_path)
+    store.create_user_memory(
+        "Профиль пользователя",
+        "Пользователь попросил строгий и краткий стиль ответов.",
+        [],
+        meta={
+            "summary": "Пользователь попросил строгий и краткий стиль ответов.",
+            "preferences": [
+                {"key": "style.tone", "value": "strict", "confidence": 0.92},
+                {"key": "style.brevity", "value": "short", "confidence": 0.9},
+            ],
+        },
+    )
+    memories = store.list_user_memories()
+    prompt = runs_route._build_chat_system_prompt(memories, None)
+
+    assert "Стиль: строгий и точный, без лишней разговорности." in prompt
+    assert "Отвечай коротко и по делу." in prompt
+
+
+def test_style_hint_from_interpretation_maps_friendly_and_brief_preferences():
+    hint = runs_route._style_hint_from_interpretation(
+        {
+            "preferences": [
+                {"key": "style.tone", "value": "friendly", "confidence": 0.9},
+                {"key": "style.brevity", "value": "short", "confidence": 0.9},
+            ]
+        }
+    )
+
+    assert hint is not None
+    assert "дружелюбный" in hint.lower()
+    assert "коротко" in hint.lower()
+
+
 def test_chat_system_prompt_owner_direct_mode_toggle(monkeypatch):
     monkeypatch.setenv("ASTRA_OWNER_DIRECT_MODE", "true")
     prompt_direct = runs_route._build_chat_system_prompt([], None)
