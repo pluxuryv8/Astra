@@ -148,6 +148,13 @@ _CHAT_RESPONSE_MODE_COMPLEX_WITH_DELIMITER_MIN_WORDS = 10
 _CHAT_INFERENCE_PROFILE_FAST = "fast"
 _CHAT_INFERENCE_PROFILE_BALANCED = "balanced"
 _CHAT_INFERENCE_PROFILE_COMPLEX = "complex"
+_DETAILED_ANSWER_REQUEST_RE = re.compile(
+    r"\b("
+    r"подробн\w*|развернут\w*|детальн\w*|максимально|глубок\w*|обширн\w*|"
+    r"пошаг\w*|шаг\s*за\s*шагом|step[- ]by[- ]step|in\s+detail|detailed"
+    r")\b",
+    flags=re.IGNORECASE,
+)
 _INTERNAL_REASONING_TAG_RE = re.compile(
     r"<\s*(think|analysis|reasoning)\b[^>]*>.*?<\s*/\s*(think|analysis|reasoning)\s*>",
     flags=re.IGNORECASE | re.DOTALL,
@@ -478,6 +485,21 @@ def _select_chat_response_mode(text: str) -> tuple[str, str]:
     if complex_reasons:
         return _CHAT_RESPONSE_MODE_PLAN, "+".join(complex_reasons)
     return _CHAT_RESPONSE_MODE_DIRECT, "simple_query"
+
+
+def _chat_compact_max_chars() -> int:
+    value = _env_int("ASTRA_CHAT_COMPACT_MAX_CHARS", 900)
+    return max(220, min(4000, value))
+
+
+def _chat_compact_max_lines() -> int:
+    value = _env_int("ASTRA_CHAT_COMPACT_MAX_LINES", 10)
+    return max(3, min(40, value))
+
+
+def _chat_compact_max_detail_lines() -> int:
+    value = _env_int("ASTRA_CHAT_COMPACT_MAX_DETAIL_LINES", 5)
+    return max(2, min(20, value))
 
 
 def _get_engine(request: Request):
@@ -1630,6 +1652,88 @@ def _finalize_user_visible_answer(text: str) -> str:
     return _postprocess_user_visible_answer(sanitized)
 
 
+def _user_requested_detailed_answer(user_text: str, response_mode: str | None) -> bool:
+    if response_mode == _CHAT_RESPONSE_MODE_PLAN:
+        return True
+    query = (user_text or "").strip()
+    if not query:
+        return False
+    return bool(_DETAILED_ANSWER_REQUEST_RE.search(query))
+
+
+def _apply_chat_brevity_limit(
+    text: str,
+    *,
+    user_text: str,
+    response_mode: str | None,
+) -> str:
+    value = (text or "").strip()
+    if not value:
+        return ""
+    if _user_requested_detailed_answer(user_text, response_mode):
+        return value
+
+    main_text, sources_text = _split_main_and_sources(value)
+    main_lines = [line for line in main_text.splitlines() if line.strip()]
+    if len(main_text) <= _chat_compact_max_chars() and len(main_lines) <= _chat_compact_max_lines():
+        return value
+
+    summary = _extract_summary(main_text)
+    detail_lines: list[str] = []
+    for raw_line in main_lines:
+        line = " ".join(raw_line.split()).strip()
+        if not line:
+            continue
+        lowered = line.lower()
+        if lowered.startswith("краткий итог:"):
+            continue
+        if lowered in {"детали:", "details:"}:
+            continue
+        detail_lines.append(line)
+
+    detail_lines = _dedupe_lines(detail_lines)
+    if summary and detail_lines:
+        first = " ".join(detail_lines[0].split()).strip()
+        if _normalize_for_dedupe(first) == _normalize_for_dedupe(summary):
+            detail_lines = detail_lines[1:]
+
+    compact_main = ""
+    if summary and detail_lines:
+        kept_details = detail_lines[: _chat_compact_max_detail_lines()]
+        compact_main = f"Краткий итог: {summary}\n\nДетали:\n" + "\n".join(kept_details)
+        if len(detail_lines) > len(kept_details):
+            compact_main = f"{compact_main}\n…"
+    elif summary:
+        compact_main = f"Краткий итог: {summary}"
+    elif detail_lines:
+        kept_details = detail_lines[: _chat_compact_max_detail_lines()]
+        compact_main = "\n".join(kept_details)
+        if len(detail_lines) > len(kept_details):
+            compact_main = f"{compact_main}\n…"
+    else:
+        compact_main = _compact_text_for_context(main_text, _chat_compact_max_chars())
+
+    if compact_main and sources_text:
+        return f"{compact_main}\n\n{sources_text}".strip()
+    return compact_main.strip() if compact_main else value
+
+
+def _finalize_chat_user_visible_answer(
+    text: str,
+    *,
+    user_text: str,
+    response_mode: str | None,
+) -> str:
+    finalized = _finalize_user_visible_answer(text)
+    if not finalized:
+        return ""
+    return _apply_chat_brevity_limit(
+        finalized,
+        user_text=user_text,
+        response_mode=response_mode,
+    )
+
+
 def _call_chat_with_soft_retry(brain, request: LLMRequest, ctx) -> Any:
     response = brain.call(request, ctx)
     if response.status != "ok":
@@ -2179,10 +2283,15 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
 
     if decision.intent == INTENT_CHAT:
         chat_started_at = time.time()
+        effective_chat_response_mode = chat_response_mode or _CHAT_RESPONSE_MODE_DIRECT
         if semantic_resilience:
             fallback_error = semantic_error_code or "semantic_resilience"
             fallback_text = _chat_resilience_text(fallback_error, user_text=payload.query_text)
-            fallback_text = _finalize_user_visible_answer(fallback_text) or _chat_resilience_text(
+            fallback_text = _finalize_chat_user_visible_answer(
+                fallback_text,
+                user_text=payload.query_text,
+                response_mode=effective_chat_response_mode,
+            ) or _chat_resilience_text(
                 fallback_error,
                 user_text=payload.query_text,
             )
@@ -2220,14 +2329,14 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
         system_text = _build_chat_system_prompt(
             memories,
             effective_response_style_hint,
-            response_mode=chat_response_mode or _CHAT_RESPONSE_MODE_DIRECT,
+            response_mode=effective_chat_response_mode,
             user_message=payload.query_text,
             history=chat_history,
             tone_analysis=chat_tone_analysis,
         )
         chat_inference = _chat_inference_settings(
             payload.query_text,
-            response_mode=chat_response_mode or _CHAT_RESPONSE_MODE_DIRECT,
+            response_mode=effective_chat_response_mode,
         )
         runtime_metrics["chat_inference_profile"] = chat_inference["profile"]
         runtime_metrics["chat_inference_profile_reason"] = chat_inference["profile_reason"]
@@ -2246,7 +2355,7 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
             repeat_penalty=chat_inference["repeat_penalty"],
             run_id=run["id"],
             metadata={
-                "chat_response_mode": chat_response_mode or _CHAT_RESPONSE_MODE_DIRECT,
+                "chat_response_mode": effective_chat_response_mode,
                 "chat_inference_profile": chat_inference["profile"],
                 "chat_inference_profile_reason": chat_inference["profile_reason"],
             },
@@ -2279,7 +2388,11 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
                 },
             )
         else:
-            clean_response_text = _finalize_user_visible_answer(response.text or "")
+            clean_response_text = _finalize_chat_user_visible_answer(
+                response.text or "",
+                user_text=payload.query_text,
+                response_mode=effective_chat_response_mode,
+            )
             if response.status != "ok" or not (response.text or "").strip():
                 fallback_error_type = response.error_type or "chat_empty_response"
                 fallback_provider = response.provider or "local"
@@ -2296,7 +2409,11 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
                 response = replace(response, text=clean_response_text)
 
         if fallback_text is not None:
-            fallback_text = _finalize_user_visible_answer(fallback_text) or _chat_resilience_text(
+            fallback_text = _finalize_chat_user_visible_answer(
+                fallback_text,
+                user_text=payload.query_text,
+                response_mode=effective_chat_response_mode,
+            ) or _chat_resilience_text(
                 fallback_error_type,
                 user_text=payload.query_text,
             )
@@ -2315,7 +2432,11 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
                     response_style_hint=effective_response_style_hint,
                 )
                 if researched is not None:
-                    researched_text = _finalize_user_visible_answer(str(researched.get("text") or ""))
+                    researched_text = _finalize_chat_user_visible_answer(
+                        str(researched.get("text") or ""),
+                        user_text=payload.query_text,
+                        response_mode=effective_chat_response_mode,
+                    )
                     if not researched_text:
                         researched_text = str(researched.get("text") or "").strip()
                     if researched_text:
@@ -2390,7 +2511,11 @@ def create_run(project_id: str, payload: RunCreate, request: Request):
                 response_style_hint=effective_response_style_hint,
             )
             if researched is not None:
-                researched_text = _finalize_user_visible_answer(str(researched.get("text") or ""))
+                researched_text = _finalize_chat_user_visible_answer(
+                    str(researched.get("text") or ""),
+                    user_text=payload.query_text,
+                    response_mode=effective_chat_response_mode,
+                )
                 if not researched_text:
                     researched_text = str(researched.get("text") or "").strip()
                 if researched_text:

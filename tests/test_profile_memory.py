@@ -517,6 +517,85 @@ def test_final_output_postprocessor_removes_toxic_noise_line():
     assert "Контролируй cash-flow каждый день" in clean
 
 
+def test_chat_brevity_limit_compacts_direct_answer_when_not_requested(monkeypatch):
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_CHARS", "180")
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_LINES", "4")
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_DETAIL_LINES", "3")
+
+    raw = (
+        "Краткий итог: Нужен план на неделю для снижения веса.\n\n"
+        "Детали:\n"
+        "1. Зафиксируй базовую калорийность и цель по дефициту.\n"
+        "2. Составь меню с белком в каждом приеме пищи.\n"
+        "3. Добавь 8-10 тысяч шагов ежедневно.\n"
+        "4. Сделай 3 силовые тренировки в неделю.\n"
+        "5. Взвешивайся каждое утро и записывай тренд.\n"
+        "6. Раз в неделю корректируй калории по факту прогресса.\n"
+        "7. Проверь сон и восстановление."
+    )
+
+    compact = runs_route._finalize_chat_user_visible_answer(
+        raw,
+        user_text="Сделай план на неделю",
+        response_mode="direct_answer",
+    )
+
+    assert "Краткий итог:" in compact
+    assert "\n…".strip() in compact
+    assert "6." not in compact
+    assert "7." not in compact
+
+
+def test_chat_brevity_limit_preserves_full_answer_for_detailed_request(monkeypatch):
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_CHARS", "180")
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_LINES", "4")
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_DETAIL_LINES", "3")
+
+    raw = (
+        "Краткий итог: Нужен план на неделю для снижения веса.\n\n"
+        "Детали:\n"
+        "1. Зафиксируй базовую калорийность и цель по дефициту.\n"
+        "2. Составь меню с белком в каждом приеме пищи.\n"
+        "3. Добавь 8-10 тысяч шагов ежедневно.\n"
+        "4. Сделай 3 силовые тренировки в неделю.\n"
+        "5. Взвешивайся каждое утро и записывай тренд."
+    )
+
+    baseline = runs_route._finalize_user_visible_answer(raw)
+    detailed = runs_route._finalize_chat_user_visible_answer(
+        raw,
+        user_text="Сделай подробно и пошагово, пожалуйста",
+        response_mode="direct_answer",
+    )
+
+    assert detailed == baseline
+
+
+def test_chat_brevity_limit_preserves_full_answer_for_step_mode(monkeypatch):
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_CHARS", "180")
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_LINES", "4")
+    monkeypatch.setenv("ASTRA_CHAT_COMPACT_MAX_DETAIL_LINES", "3")
+
+    raw = (
+        "Краткий итог: Нужен план на неделю для снижения веса.\n\n"
+        "Детали:\n"
+        "1. Зафиксируй базовую калорийность и цель по дефициту.\n"
+        "2. Составь меню с белком в каждом приеме пищи.\n"
+        "3. Добавь 8-10 тысяч шагов ежедневно.\n"
+        "4. Сделай 3 силовые тренировки в неделю.\n"
+        "5. Взвешивайся каждое утро и записывай тренд."
+    )
+
+    baseline = runs_route._finalize_user_visible_answer(raw)
+    detailed = runs_route._finalize_chat_user_visible_answer(
+        raw,
+        user_text="Сделай план",
+        response_mode="step_by_step_plan",
+    )
+
+    assert detailed == baseline
+
+
 def test_chat_resilience_text_is_useful_and_structured():
     text = runs_route._chat_resilience_text("connection_error", user_text="кто такой кен канеки")
     assert text.startswith("Краткий итог:")
